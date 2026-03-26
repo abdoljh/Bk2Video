@@ -23,12 +23,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from core.ingestor      import PDFIngestor
-from ocr_engine    import OCREngine, OCRBackend
-from normalizer    import ArabicTextNormalizer
-from diacritizer   import FarasaDiacritizer
-from chunker       import SemanticChunker, Chunk
-from output_writer import OutputWriter
+from .core.ingestor      import PDFIngestor
+from .core.ocr_engine    import OCREngine, OCRBackend
+from .core.normalizer    import ArabicTextNormalizer
+from .core.diacritizer   import FarasaDiacritizer
+from .core.chunker       import SemanticChunker, Chunk
+from .core.output_writer import OutputWriter
 
 logger = logging.getLogger(__name__)
 
