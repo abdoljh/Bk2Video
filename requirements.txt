@@ -1,21 +1,24 @@
-# ── Phase 1: Extraction & Pre-processing ──────────────────────────────
-# Core
+# ── Arabic Book Brief Engine — Phase 1 ────────────────────────────────
+# Streamlit Community Cloud reads requirements.txt from the repo root.
+
+# Core UI
 streamlit>=1.35.0
-PyMuPDF>=1.24.0          # fitz — digital PDF extraction + page rendering
 
-# Arabic text
-arabic-reshaper>=3.0.0   # reconnects split Arabic glyphs
-python-bidi>=0.6.0       # BiDi algorithm for RTL reordering
+# PDF extraction
+PyMuPDF>=1.24.0
 
-# OCR (scanned PDFs)
-easyocr>=1.7.1           # primary OCR — Arabic model bundled
-Pillow>=10.0.0           # image handling
-numpy>=1.24.0            # required by EasyOCR
-# pytesseract>=0.3.10    # uncomment if using Tesseract fallback
+# Arabic text correction
+arabic-reshaper>=3.0.0
+python-bidi>=0.6.0
 
-# Diacritization
-requests>=2.31.0         # for Farasa REST API calls
-# mishkal                # uncomment for offline fallback (pip install mishkal)
+# OCR — scanned PDFs
+easyocr>=1.7.1
+Pillow>=10.0.0
+numpy>=1.24.0
+# pytesseract>=0.3.10   # uncomment if switching OCR backend to Tesseract
 
-# Chunking / utilities
-# langchain>=0.2.0       # optional: use LangChain's splitter instead of built-in
+# HTTP (Farasa API)
+requests>=2.31.0
+
+# Mishkal offline diacritizer (optional — uncomment to enable)
+# mishkal
