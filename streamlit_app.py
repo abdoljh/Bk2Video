@@ -15,7 +15,8 @@ import streamlit as st
 # ── ensure phase1 package is importable when running as `streamlit run app.py`
 sys.path.insert(0, str(Path(__file__).parent))
 
-from phase1 import Phase1Pipeline, Phase1Config
+#from phase1 import Phase1Pipeline, Phase1Config
+from pipeline import Phase1Pipeline, Phase1Config
 
 # ── Logging to both console and Streamlit capture buffer ──────────────── #
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
