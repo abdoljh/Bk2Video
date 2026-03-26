@@ -1,1 +1,21 @@
-streamlit
+# ── Phase 1: Extraction & Pre-processing ──────────────────────────────
+# Core
+streamlit>=1.35.0
+PyMuPDF>=1.24.0          # fitz — digital PDF extraction + page rendering
+
+# Arabic text
+arabic-reshaper>=3.0.0   # reconnects split Arabic glyphs
+python-bidi>=0.6.0       # BiDi algorithm for RTL reordering
+
+# OCR (scanned PDFs)
+easyocr>=1.7.1           # primary OCR — Arabic model bundled
+Pillow>=10.0.0           # image handling
+numpy>=1.24.0            # required by EasyOCR
+# pytesseract>=0.3.10    # uncomment if using Tesseract fallback
+
+# Diacritization
+requests>=2.31.0         # for Farasa REST API calls
+# mishkal                # uncomment for offline fallback (pip install mishkal)
+
+# Chunking / utilities
+# langchain>=0.2.0       # optional: use LangChain's splitter instead of built-in
