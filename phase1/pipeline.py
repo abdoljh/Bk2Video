@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from ingestor      import PDFIngestor
+from core.ingestor      import PDFIngestor
 from ocr_engine    import OCREngine, OCRBackend
 from normalizer    import ArabicTextNormalizer
 from diacritizer   import FarasaDiacritizer
