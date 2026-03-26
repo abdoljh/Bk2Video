@@ -23,8 +23,8 @@ _farasa_key_default = st.secrets.get("FARASA_API_KEY", "") or os.getenv("FARASA_
 
 # ── Phase 1 package is at ./phase1 relative to repo root ──────────────── #
 sys.path.insert(0, str(Path(__file__).parent))
-from pipeline import Phase1Pipeline, Phase1Config  # noqa: E402
-#from phase1 import pipeline  
+from phase1 import pipeline  # noqa: E402
+from pipeline import Phase1Pipeline, Phase1Config
 
 # ── Logging ───────────────────────────────────────────────────────────── #
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
