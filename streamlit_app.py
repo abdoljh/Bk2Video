@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+import pipeline
 
 # ── ensure phase1 package is importable when running as `streamlit run app.py`
 sys.path.insert(0, str(Path(__file__).parent))
