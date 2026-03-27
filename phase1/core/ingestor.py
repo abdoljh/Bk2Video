@@ -165,7 +165,7 @@ class PDFIngestor:
                 for span in line.get("spans", []):
                     for ch in span.get("chars", []):
                         c   = ch.get("c", 0)        # Unicode codepoint int
-                        if c <= 0x20:               # skip control chars / spaces
+                        if ord(c) <= 0x20:               # skip control chars / spaces if c <= 0x20
                             continue
                         ox, oy = ch["origin"]
                         chars.append((ox, oy, chr(c)))
