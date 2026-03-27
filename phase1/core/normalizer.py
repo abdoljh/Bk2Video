@@ -2,21 +2,23 @@
 Phase 1 — ArabicTextNormalizer
 Source-aware Arabic text normalisation.
 
-The critical insight driving this design:
-─────────────────────────────────────────
-• PyMuPDF (digital PDFs) already returns Arabic in correct LOGICAL order.
-  Applying BiDi get_display() on top of it RE-REVERSES the text into visual
-  order — which looks wrong and breaks every downstream consumer (LLM, TTS).
-  Reshaping is also wrong here: PyMuPDF returns connected Unicode code points,
-  not isolated glyph forms.
+PyMuPDF extraction behaviour for Arabic digital PDFs
+─────────────────────────────────────────────────────
+PyMuPDF returns Arabic glyphs in correct Unicode code points (connected,
+not isolated forms), BUT it sequences words in VISUAL left-to-right order
+across the page — i.e. the last word of each RTL sentence comes first.
 
-• EasyOCR / Tesseract (scanned PDFs) return text in VISUAL order with isolated
-  glyph forms. These DO need reshape + bidi reordering.
+What is needed per source
+──────────────────────────
+  digital  →  NFC  →  bidi reorder (no reshape)  →  clean
+  scanned  →  NFC  →  reshape  →  bidi reorder   →  clean
 
-Pipeline by source
-──────────────────
-  digital  →  NFC  →  clean  →  done          (no reshape, no bidi)
-  scanned  →  NFC  →  reshape  →  bidi  →  clean
+Why reshape is skipped for digital
+────────────────────────────────────
+PyMuPDF already returns connected Unicode glyphs. arabic-reshaper converts
+connected forms INTO isolated glyph forms (intended for rendering engines).
+Applying it to already-correct text breaks the shaping. Only OCR output —
+which comes out in isolated visual glyph forms — needs reshaping.
 """
 
 from __future__ import annotations
@@ -30,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 Source = Literal["digital", "scanned"]
 
-# ── Lazy imports ──────────────────────────────────────────────────────── #
 _reshaper    = None
 _get_display = None
 
@@ -46,7 +47,6 @@ def _load_arabic_libs() -> None:
         _get_display = get_display
     except ImportError as exc:
         raise ImportError(
-            "Arabic text libraries missing.\n"
             "Run: pip install arabic-reshaper python-bidi"
         ) from exc
 
@@ -55,9 +55,8 @@ class ArabicTextNormalizer:
     """
     Normalises Arabic text with source-aware processing.
 
-    Args:
-        scanned_reshape: Apply reshape + bidi for scanned/OCR pages (default True).
-                         Always False for digital pages regardless of this flag.
+    digital pages: bidi reorder only (no reshape — glyphs already connected)
+    scanned pages: reshape first, then bidi reorder
     """
 
     _NOISE_PATTERNS = [
@@ -67,42 +66,36 @@ class ArabicTextNormalizer:
         re.compile(r"\n{4,}", re.MULTILINE),           # excessive blank lines
     ]
 
-    def __init__(self, scanned_reshape: bool = True):
-        self.scanned_reshape = scanned_reshape
-
-    # ------------------------------------------------------------------ #
-    #  Public API                                                          #
-    # ------------------------------------------------------------------ #
-
     def normalize(self, text: str, source: Source = "digital") -> str:
-        """
-        Normalise Arabic text.
-
-        Args:
-            text:   Raw extracted text from ingestor or OCR engine.
-            source: "digital" (PyMuPDF) or "scanned" (OCR output).
-        """
         if not text or not text.strip():
             return ""
 
-        # Step 1: Unicode canonical form — always safe
+        _load_arabic_libs()
+
+        # Step 1: Unicode canonical form
         text = unicodedata.normalize("NFC", text)
 
-        # Step 2: reshape + bidi ONLY for scanned/OCR text
-        if source == "scanned" and self.scanned_reshape:
-            _load_arabic_libs()
-            text = self._reshape_lines(text)
-            text = self._bidi_lines(text)
+        # Step 2: reshape only for scanned/OCR output
+        if source == "scanned":
+            cfg = _reshaper.ArabicReshaper(configuration={
+                "delete_harakat":    False,
+                "support_ligatures": True,
+            })
+            text = "\n".join(cfg.reshape(line) for line in text.splitlines())
 
-        # Step 3: clean noise
+        # Step 3: bidi reorder — needed for BOTH digital and scanned
+        # digital: fixes word-order reversal from PyMuPDF visual extraction
+        # scanned: fixes character-level reversal from OCR visual output
+        text = "\n".join(
+            _get_display(line, base_dir="R") for line in text.splitlines()
+        )
+
+        # Step 4: clean noise
         text = self._clean(text)
         return text.strip()
 
     def normalize_pages(self, pages: list) -> list:
-        """
-        In-place normalisation of RawPage objects.
-        Reads each page's own pdf_type to choose the correct path.
-        """
+        """In-place normalisation; reads pdf_type from each RawPage."""
         for page in pages:
             source: Source = "scanned" if page.pdf_type == "scanned" else "digital"
             before = len(page.raw_text)
@@ -112,22 +105,6 @@ class ArabicTextNormalizer:
                 page.page_number, source, before, len(page.raw_text),
             )
         return pages
-
-    # ------------------------------------------------------------------ #
-    #  Internal helpers                                                    #
-    # ------------------------------------------------------------------ #
-
-    def _reshape_lines(self, text: str) -> str:
-        cfg = _reshaper.ArabicReshaper(configuration={
-            "delete_harakat":  False,   # preserve diacritics
-            "support_ligatures": True,
-        })
-        return "\n".join(cfg.reshape(line) for line in text.splitlines())
-
-    def _bidi_lines(self, text: str) -> str:
-        return "\n".join(
-            _get_display(line, base_dir="R") for line in text.splitlines()
-        )
 
     def _clean(self, text: str) -> str:
         for pat in self._NOISE_PATTERNS:
