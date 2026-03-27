@@ -168,7 +168,8 @@ class PDFIngestor:
                         if ord(c) <= 0x20:               # skip control chars / spaces if c <= 0x20
                             continue
                         ox, oy = ch["origin"]
-                        chars.append((ox, oy, chr(c)))
+                        c_as_int = int(c)
+                        chars.append((ox, oy, chr(c_as_int)))
 
         if not chars:
             return ""
