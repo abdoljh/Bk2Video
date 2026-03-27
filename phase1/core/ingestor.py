@@ -3,29 +3,44 @@ Phase 1 — PDFIngestor
 Detects whether a PDF is digitally-born or scanned, then routes to the
 appropriate extraction backend.
 
-Arabic RTL extraction strategy
-────────────────────────────────
-page.get_text("text") loses directionality — Arabic words come out in
-visual left-to-right order. We use get_text("dict") for span-level
-bounding boxes, then:
+Arabic RTL extraction — known PDF rendering artefacts handled
+──────────────────────────────────────────────────────────────
+1. Presentation Forms ligatures (U+FB50–U+FDFF, U+FE70–U+FEFF)
+   PDF renderers store lam-alef and similar ligatures as single glyphs
+   from the Arabic Presentation Forms blocks.  These must be mapped back
+   to their canonical two-character sequences BEFORE any further processing:
+     ﻷ (U+FBB7 lam+alef-hamza-above) → لأ
+     ﻹ (lam+alef-hamza-below)         → لإ
+     ﻻ (lam+alef)                     → لا
+     ﻼ (lam+alef+shadda)              → لا + shadda
+     ﺍ isolated alef forms            → ا  etc.
+   unicodedata.normalize("NFKC") handles the bulk of these.
 
-  1. Group spans into visual lines by y-coordinate.
-  2. Within each line, separate punctuation-only spans from word spans.
-     Punctuation (.,،؛؟!) is LTR-neutral and must be reattached to the
-     word immediately to its left in the VISUAL layout (which is the
-     word to its right in reading order) rather than being sorted with
-     the RTL word spans.
-  3. Sort word spans right-to-left (descending x).
-  4. Re-attach punctuation to the correct word.
-  5. Join lines into paragraphs: lines that end mid-sentence (no sentence-
-     terminal punctuation) are joined with a space rather than a newline,
-     so that PDF line-wrap artefacts don't fragment sentences.
+2. Word-order reversal
+   get_text("dict") gives spans in visual left-to-right order.
+   We sort word spans right-to-left (descending x) per line.
+
+3. Punctuation attachment
+   Punctuation spans are direction-neutral.  We determine whether each
+   punctuation span trails (follows in reading order) its neighbouring
+   word by comparing x-positions:
+     - punct x  <  word x  →  punct is to the LEFT visually
+                            →  in RTL it FOLLOWS the word  →  append
+     - punct x  >  word x  →  punct is to the RIGHT visually
+                            →  in RTL it PRECEDES the word →  prepend
+
+4. Soft line-joining
+   PDF layout wraps lines at the page margin.  Lines that do not end
+   with a sentence-terminal character are joined to the next with a
+   space.  Genuine paragraph breaks (blank lines in the source) produce
+   double newlines in the output so the chunker can detect them.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -38,12 +53,50 @@ PDFType = Literal["digital", "scanned", "mixed"]
 
 _DIGITAL_CHARS_THRESHOLD = 100
 
-# Punctuation that is direction-neutral and must be reattached, not sorted
-_PUNCT_ONLY = re.compile(r'^[\s\.,،؛؟!:\-–—()«»\[\]]+$')
+# Spans that are purely punctuation / whitespace (no Arabic letters)
+_PUNCT_ONLY = re.compile(r'^[\s\.,،؛؟!:\-–—()\[\]«»"\']+$')
 
-# Sentence-terminal characters — a line ending with these gets a newline;
-# otherwise it is joined to the next line with a space.
-_SENT_TERMINAL = re.compile(r'[.؟!\n]\s*$')
+# A line ends a sentence if its last non-space character is one of these
+_SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
+
+# Arabic Presentation Forms that NFKC does not fully resolve
+# Maps single ligature code points → canonical string
+_LIGATURE_MAP: dict[str, str] = {
+    '\uFB50': 'ا',   # ARABIC LETTER ALEF WASLA ISOLATED FORM
+    '\uFB51': 'ا',
+    '\uFB52': 'ب',   '\uFB53': 'ب', '\uFB54': 'ب', '\uFB55': 'ب',
+    '\uFB56': 'پ',   '\uFB57': 'پ', '\uFB58': 'پ', '\uFB59': 'پ',
+    '\uFB6A': 'و',   '\uFB6B': 'و',
+    '\uFB70': 'ڈ',
+    '\uFB8A': 'ژ',   '\uFB8B': 'ژ',
+    '\uFB8C': 'ر',
+    '\uFB8E': 'ک',   '\uFB8F': 'ک', '\uFB90': 'ک', '\uFB91': 'ک',
+    '\uFB92': 'گ',   '\uFB93': 'گ', '\uFB94': 'گ', '\uFB95': 'گ',
+    '\uFBFC': 'ی',   '\uFBFD': 'ی', '\uFBFE': 'ی', '\uFBFF': 'ی',
+    # Lam-Alef ligatures (the most common source of ألـ / املـ artefacts)
+    '\uFEF5': 'لآ',  # LAM WITH ALEF WITH MADDA ABOVE
+    '\uFEF6': 'لآ',
+    '\uFEF7': 'لأ',  # LAM WITH ALEF WITH HAMZA ABOVE  ← fixes ألدوات→الأدوات
+    '\uFEF8': 'لأ',
+    '\uFEF9': 'لإ',  # LAM WITH ALEF WITH HAMZA BELOW
+    '\uFEFA': 'لإ',
+    '\uFEFB': 'لا',  # LAM WITH ALEF  ← fixes املعنى→المعنى
+    '\uFEFC': 'لا',
+}
+
+# Build a single translation table for fast replacement
+_LIGATURE_TABLE = str.maketrans(_LIGATURE_MAP)
+
+
+def _normalize_presentation_forms(text: str) -> str:
+    """
+    Two-pass normalisation of Arabic Presentation Forms:
+    1. NFKC handles most compatibility decompositions.
+    2. Manual table for lam-alef ligatures that NFKC leaves intact.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_LIGATURE_TABLE)
+    return text
 
 
 @dataclass
@@ -65,11 +118,7 @@ class IngestionResult:
 
 class PDFIngestor:
     """
-    Auto-detects PDF type and extracts RTL-correct text from every page.
-
-    Digital PDFs → dict-mode extraction with RTL span reordering.
-    Scanned PDFs → page rasterised to PNG, handed to OCREngine.
-    Mixed PDFs   → per-page routing.
+    Auto-detects PDF type and extracts RTL-correct, ligature-resolved text.
     """
 
     def __init__(self, dpi: int = 200):
@@ -140,26 +189,15 @@ class PDFIngestor:
     @staticmethod
     def _extract_rtl_text(page: fitz.Page) -> str:
         """
-        Extract page text in correct RTL reading order.
-
-        Steps
-        ─────
-        1. Collect spans from all text blocks via dict mode.
-        2. Group into visual lines by rounded y-coordinate.
-        3. Per line: separate punctuation spans from word spans.
-           Sort word spans right-to-left (descending x).
-           Re-attach each punctuation span to the nearest word span
-           on its left in the VISUAL layout (right in reading order).
-        4. Join lines: lines without a sentence-terminal character are
-           soft-joined to the next line with a space to undo PDF wrapping.
+        Extract page text in correct RTL reading order with ligatures resolved.
         """
         data = page.get_text(
             "dict",
             flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP,
         )
 
-        # ── 1. Bucket spans by visual line (y rounded to 1 dp) ────────
-        # Each bucket entry: (x_origin, text, is_punct)
+        # ── Step 1: Collect spans bucketed by visual line (y rounded) ──
+        # Each entry: (x_origin, text, is_punct)
         buckets: dict[float, list[tuple[float, str, bool]]] = {}
 
         for block in data.get("blocks", []):
@@ -168,64 +206,82 @@ class PDFIngestor:
             for line in block.get("lines", []):
                 y_key = round(line["bbox"][1], 1)
                 for span in line.get("spans", []):
-                    txt = span.get("text", "")
-                    if not txt.strip():
+                    raw = span.get("text", "")
+                    if not raw.strip():
                         continue
-                    x   = span["origin"][0]
-                    is_punct = bool(_PUNCT_ONLY.match(txt.strip()))
-                    buckets.setdefault(y_key, []).append((x, txt.strip(), is_punct))
+                    # Resolve ligatures immediately at extraction
+                    txt      = _normalize_presentation_forms(raw.strip())
+                    x        = span["origin"][0]
+                    is_punct = bool(_PUNCT_ONLY.match(txt))
+                    buckets.setdefault(y_key, []).append((x, txt, is_punct))
 
-        # ── 2. Reconstruct each line in RTL order ─────────────────────
+        # ── Step 2: Reconstruct each visual line in RTL reading order ──
         visual_lines: list[str] = []
 
         for y_key in sorted(buckets):
-            spans      = buckets[y_key]
-            word_spans = [(x, t) for x, t, p in spans if not p]
-            punct_spans= [(x, t) for x, t, p in spans if p]
+            entries    = buckets[y_key]
+            word_spans = [(x, t) for x, t, p in entries if not p]
+            punct_spans= [(x, t) for x, t, p in entries if p]
 
-            # Sort words right-to-left
+            # Sort word spans right-to-left
             word_spans.sort(key=lambda s: s[0], reverse=True)
-
-            # Attach each punctuation span to the word whose visual-left
-            # edge is closest (i.e. the word just to its right in reading order)
-            # Build a mutable list of (x, text) for words
             words: list[list] = [[x, t] for x, t in word_spans]
 
+            if not words:
+                # Punct-only line — just emit it
+                visual_lines.append(" ".join(t for _, t, _ in entries))
+                continue
+
+            # Attach punctuation based on visual position:
+            #   punct visually LEFT of nearest word  → append (follows in RTL)
+            #   punct visually RIGHT of nearest word → prepend (precedes in RTL)
             for px, pt in punct_spans:
-                if not words:
-                    # No words on line — append punct at end
-                    words.append([px, pt])
-                    continue
-                # Find the word span whose x is just greater than punct x
-                # (the word to the right of the punct in visual space =
-                #  the word to the left in reading order, so punct trails it)
-                best_idx = 0
-                best_diff = float("inf")
-                for idx, (wx, _) in enumerate(words):
-                    diff = abs(wx - px)
-                    if diff < best_diff:
-                        best_diff = diff
-                        best_idx = idx
-                # Append punct to that word's text
-                words[best_idx][1] = words[best_idx][1] + pt
+                # Find nearest word by x distance
+                nearest_idx  = min(range(len(words)), key=lambda i: abs(words[i][0] - px))
+                nearest_x    = words[nearest_idx][0]
+
+                if px < nearest_x:
+                    # Punct is to the LEFT of the word visually
+                    # → it follows the word in RTL reading order → append
+                    words[nearest_idx][1] = words[nearest_idx][1] + pt
+                else:
+                    # Punct is to the RIGHT of the word visually
+                    # → it precedes the word in RTL reading order → prepend
+                    words[nearest_idx][1] = pt + words[nearest_idx][1]
 
             line_text = " ".join(t for _, t in words)
             visual_lines.append(line_text)
 
-        # ── 3. Soft-join wrapped lines into paragraphs ─────────────────
+        # ── Step 3: Soft-join mid-sentence line wraps ──────────────
+        # Rules:
+        #   a) Short line (<=60 chars, no sentence punct) -> heading.
+        #      Wrap with blank lines so the chunker sees paragraph breaks.
+        #   b) Line ending with . ? ! -> sentence end -> single newline.
+        #   c) Everything else -> wrap continuation -> join with space.
         if not visual_lines:
             return ""
+
+        _IS_HEADING = re.compile(r'^(?!.*[.،؛؟!]).{4,60}$')
+
+        def is_heading(s: str) -> bool:
+            s = s.strip()
+            return bool(_IS_HEADING.match(s)) and len(s) <= 60
 
         paragraphs: list[str] = []
         buffer = visual_lines[0]
 
         for line in visual_lines[1:]:
-            if _SENT_TERMINAL.search(buffer):
-                # Previous line ended a sentence → hard break
+            if is_heading(buffer):
+                paragraphs.extend([buffer, ""])
+                buffer = line
+            elif is_heading(line):
+                if buffer:
+                    paragraphs.extend([buffer, ""])
+                buffer = line
+            elif _SENT_TERMINAL.search(buffer):
                 paragraphs.append(buffer)
                 buffer = line
             else:
-                # Mid-sentence wrap → join with space
                 buffer = buffer + " " + line
 
         paragraphs.append(buffer)
