@@ -3,25 +3,29 @@ Phase 1 — PDFIngestor
 Detects whether a PDF is digitally-born or scanned, then routes to the
 appropriate extraction backend.
 
-Arabic RTL extraction — definitive approach
-────────────────────────────────────────────
-Arabic PDF fonts frequently have broken ToUnicode tables that cause:
-  • Lam-alef ligature glyphs decoded in wrong char order (alef before lam)
-  • Hamza-alef forms confused with plain alef
-  • Span-level text in visual (LTR) order rather than logical (RTL) order
+Arabic RTL extraction — span-level spatial sort
+─────────────────────────────────────────────────
+The correct algorithm for Arabic PDFs with broken ToUnicode tables:
 
-All of these are bypassed by working at the CHARACTER level using
-page.get_text("rawdict"), which gives us each glyph's Unicode codepoint
-AND its exact x-coordinate on the page.
+  WRONG: sort individual characters by x-position.
+         Characters within a single ligature glyph (e.g. لا) get
+         assigned different virtual x-origins by PyMuPDF, so they
+         end up space-separated and potentially reordered.
+
+  RIGHT: sort SPANS by x-position; preserve character order within
+         each span. PyMuPDF guarantees that characters within one
+         span belong to the same font run and are listed in their
+         correct glyph sequence. The only ordering problem is
+         between spans (visual LTR vs logical RTL).
 
 Algorithm per page:
-  1. Collect every (x, y, char) triple from rawdict.
-  2. Group chars into visual lines by y-coordinate (±2pt tolerance).
-  3. Within each line, sort chars by x DESCENDING → right-to-left order.
-  4. Identify word boundaries by horizontal gaps > threshold.
-  5. Join chars into words, apply NFKC normalization per word.
-  6. Detect headings (short lines, no sentence punct) and wrap with \\n\\n.
-  7. Soft-join remaining wrapped lines into paragraphs.
+  1. Collect spans from rawdict with their representative x-coord
+     (leftmost char origin in the span).
+  2. Group spans into visual lines by y-coordinate (±2pt tolerance).
+  3. Within each line sort spans descending-x → RTL reading order.
+  4. Concatenate chars within each span (original order), apply NFKC.
+  5. Join spans with a space; join lines into paragraphs with heading
+     detection and soft line-joining.
 """
 
 from __future__ import annotations
@@ -40,18 +44,9 @@ logger = logging.getLogger(__name__)
 PDFType = Literal["digital", "scanned", "mixed"]
 
 _DIGITAL_CHARS_THRESHOLD = 100
-
-# Gap between chars (in points) that signals a word boundary
-_WORD_GAP_PT = 3.0
-
-# Line grouping tolerance (points) — chars within this y-range = same line
-_LINE_TOL_PT = 2.0
-
-# Sentence-terminal: line ending with one of these → hard paragraph break
+_LINE_TOL_PT = 2.0          # y-tolerance for grouping chars onto same line
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
-
-# Heading: short line (<=80 chars) with no sentence-end punctuation
-_IS_HEADING = re.compile(r'^(?!.*[.،؛؟!]).{4,80}$')
+_IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,80}$')
 
 
 @dataclass
@@ -123,12 +118,10 @@ class PDFIngestor:
             "digital" if scanned == 0 else
             "mixed"
         )
-
         logger.info(
             "Ingested '%s' — %d pages (%d digital, %d scanned)",
             pdf_path.name, len(pages), digital, scanned,
         )
-
         return IngestionResult(
             source_path=str(pdf_path),
             pdf_type=overall_type,
@@ -138,93 +131,104 @@ class PDFIngestor:
         )
 
     # ------------------------------------------------------------------ #
-    #  Character-level RTL extraction                                      #
+    #  Span-level RTL extraction                                           #
     # ------------------------------------------------------------------ #
 
     @staticmethod
     def _extract_rtl_text(page: fitz.Page) -> str:
         """
-        Reconstruct page text from individual character positions.
+        Extract Arabic text in correct RTL reading order.
 
-        Uses rawdict mode to get per-character (x, y, unicode) data,
-        then sorts characters spatially to recover correct RTL reading order
-        regardless of how the font's ToUnicode table is structured.
+        Sorts SPANS (not individual chars) by x-position descending.
+        Characters within each span stay in their original rawdict order,
+        which PyMuPDF guarantees is the correct glyph sequence for that span.
         """
         raw = page.get_text(
             "rawdict",
             flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP,
         )
 
-        # ── 1. Collect all (x, y, char) triples ──────────────────────
-        chars: list[tuple[float, float, str]] = []
+        # Each entry: (x_representative, y_representative, span_text)
+        # x = leftmost char origin in span (used for RTL sort)
+        # y = first char origin y (used for line grouping)
+        span_entries: list[tuple[float, float, str]] = []
 
         for block in raw.get("blocks", []):
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
-                    for ch in span.get("chars", []):
-                        c   = ch.get("c", 0)        # Unicode codepoint int
-                        if ord(c) <= 0x20:               # skip control chars / spaces if c <= 0x20
-                            continue
-                        ox, oy = ch["origin"]
-                        c_as_int = ord(c)
-                        chars.append((ox, oy, chr(c_as_int)))
+                    char_data = span.get("chars", [])
+                    if not char_data:
+                        continue
 
-        if not chars:
+                    # Build span text from chars in their original order
+                    # rawdict "c" field: int codepoint in newer PyMuPDF,
+                    # string character in some builds — handle both.
+                    span_chars = []
+                    xs: list[float] = []
+                    ys: list[float] = []
+
+                    for ch in char_data:
+                        c = ch.get("c", 0)
+                        # Normalise to string
+                        if isinstance(c, int):
+                            if c <= 0x20:       # skip control / space
+                                continue
+                            ch_str = chr(c)
+                        else:
+                            ch_str = str(c)
+                            if not ch_str.strip():
+                                continue
+
+                        ox, oy = ch["origin"]
+                        span_chars.append(ch_str)
+                        xs.append(ox)
+                        ys.append(oy)
+
+                    if not span_chars:
+                        continue
+
+                    span_text = unicodedata.normalize(
+                        "NFKC", "".join(span_chars)
+                    )
+                    if not span_text.strip():
+                        continue
+
+                    x_rep = min(xs)     # leftmost x → used for RTL sort
+                    y_rep = ys[0]       # first char y → used for line grouping
+                    span_entries.append((x_rep, y_rep, span_text))
+
+        if not span_entries:
             return ""
 
-        # ── 2. Group chars into visual lines by y-coordinate ──────────
-        chars.sort(key=lambda t: t[1])              # sort by y first
-        lines: list[list[tuple[float, str]]] = []   # list of [(x, char)]
+        # ── Group spans into visual lines by y-coordinate ─────────────
+        span_entries.sort(key=lambda e: e[1])   # sort by y
+        lines: list[list[tuple[float, str]]] = []
         current_line: list[tuple[float, str]] = []
-        current_y = chars[0][1]
+        current_y = span_entries[0][1]
 
-        for ox, oy, ch in chars:
-            if abs(oy - current_y) > _LINE_TOL_PT:
+        for x, y, text in span_entries:
+            if abs(y - current_y) > _LINE_TOL_PT:
                 if current_line:
                     lines.append(current_line)
-                current_line = [(ox, ch)]
-                current_y    = oy
+                current_line = [(x, text)]
+                current_y    = y
             else:
-                current_line.append((ox, ch))
+                current_line.append((x, text))
 
         if current_line:
             lines.append(current_line)
 
-        # ── 3. Per line: sort chars right-to-left, group into words ───
+        # ── Per line: sort spans descending-x → RTL reading order ─────
         visual_lines: list[str] = []
+        for line_spans in lines:
+            line_spans.sort(key=lambda t: t[0], reverse=True)
+            line_text = " ".join(t for _, t in line_spans).strip()
+            if line_text:
+                visual_lines.append(line_text)
 
-        for line_chars in lines:
-            # Sort descending x → right-to-left character order
-            line_chars.sort(key=lambda t: t[0], reverse=True)
-
-            # Group into words by horizontal gap
-            words: list[str] = []
-            word_chars: list[str] = [line_chars[0][1]]
-            prev_x = line_chars[0][0]
-
-            for x, ch in line_chars[1:]:
-                gap = abs(prev_x - x)
-                if gap > _WORD_GAP_PT:
-                    word = unicodedata.normalize("NFKC", "".join(word_chars))
-                    if word.strip():
-                        words.append(word)
-                    word_chars = [ch]
-                else:
-                    word_chars.append(ch)
-                prev_x = x
-
-            # Flush last word
-            if word_chars:
-                word = unicodedata.normalize("NFKC", "".join(word_chars))
-                if word.strip():
-                    words.append(word)
-
-            if words:
-                visual_lines.append(" ".join(words))
-
-        # ── 4. Paragraph reconstruction ───────────────────────────────
+        # ── Paragraph reconstruction with heading detection ────────────
         if not visual_lines:
             return ""
 
