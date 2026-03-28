@@ -58,39 +58,43 @@ def _load_arabic_libs() -> None:
 
 def fix_article(word: str) -> str:
     """
-    Fix lam-alef article encoding errors in a single word token.
+    Fix lam-alef article encoding errors from Arabic PDF font ToUnicode tables.
 
-    Rule B — starts with [hamza/madda-alef][lam]:
-      Short (≤3 chars): swap → أل becomes لأ  (e.g. ألي → لأي)
-      Long + alef after lam: insert plain alef  (e.g. اإل → الإ)
-      Long + consonant after lam: insert plain alef  (e.g. ألدوات → الأدوات)
+    Rule B — word starts with [hamza/madda-alef][lam]:
+      len==2:                    swap  (standalone أل → لأ)
+      len==3 + إ at pos 0:       leave alone  (إلى, إلا are prepositions)
+      len==3 + أ/آ at pos 0:     swap  (ألي → لأي)
+      len≥4 + alef after lam:    insert plain alef  (اإل → الإ)
+      len≥4 + consonant after:   insert plain alef  (ألدوات → الأدوات)
 
-    Rule A — scan whole word for [ا][non-lam][ل] → swap:
-      Fixes امل→الم, اآلن→الآن, اإلنترنت→الإنترنت and internal sequences.
-      Guard: [ا][ل] adjacent (c[i+1]==lam) is left untouched (already correct).
+    Rule A — word starts with [ا][non-lam][ل] at positions 0,1,2 → swap 1 and 2:
+      Fixes: امل→الم, اآلن→الآن, اإلنترنت→الإنترنت
+      Restricted to word-START only (positions 0-2) to avoid corrupting
+      genuine Arabic roots like كامل, عامل that contain ا+م+ل internally.
 
     Standalone "ال" → "لا"  (negation/emphasis particle).
+
+    Known limitation: inner root-level لا encoding in compound words like
+    الإعلامية cannot be fixed without a lexicon (produces الإعالمية).
     """
     if len(word) < 2:
         return word
     c = list(word)
 
     # Rule B
-    if c[0] in (_ALEF_HA, _ALEF_HB, _ALEF_MA) and len(c) >= 2 and c[1] == _LAM:
+    if c[0] in (_ALEF_HA, _ALEF_HB, _ALEF_MA) and c[1] == _LAM:
         after_lam = c[2] if len(c) > 2 else None
-        if len(word) <= 3 or after_lam is None:
-            c[0], c[1] = c[1], c[0]                      # swap
+        if len(word) == 2:
+            c[0], c[1] = c[1], c[0]                      # standalone → swap
+        elif len(word) == 3:
+            if c[0] != _ALEF_HB:                          # إ = preposition → leave
+                c[0], c[1] = c[1], c[0]                  # أ/آ → swap (ألي → لأي)
         else:
-            c = [_ALEF, _LAM] + c[0:1] + c[2:]           # insert plain alef
+            c = [_ALEF, _LAM] + c[0:1] + c[2:]           # long → insert plain alef
 
-    # Rule A — scan all positions
-    i = 0
-    while i < len(c) - 2:
-        if c[i] == _ALEF and c[i + 1] != _LAM and c[i + 2] == _LAM:
-            c[i + 1], c[i + 2] = c[i + 2], c[i + 1]
-            i += 3
-        else:
-            i += 1
+    # Rule A — word-start ONLY (positions 0,1,2)
+    if len(c) >= 3 and c[0] == _ALEF and c[1] != _LAM and c[2] == _LAM:
+        c[1], c[2] = c[2], c[1]
 
     # Standalone ال → لا
     if len(c) == 2 and c[0] == _ALEF and c[1] == _LAM:
