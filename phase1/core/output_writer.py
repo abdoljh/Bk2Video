@@ -1,39 +1,22 @@
 """
 Phase 1 — OutputWriter
-Serialises Phase 1 results to both JSON (structured) and plain text formats.
+Writes three files per run:
 
-JSON schema
-───────────
-{
-  "source":       "book.pdf",
-  "pdf_type":     "digital" | "scanned" | "mixed",
-  "total_pages":  int,
-  "metadata":     { title, author, subject, creator, pages },
-  "chunks": [
-    {
-      "chunk_id":   int,
-      "chapter":    str,
-      "page_start": int,
-      "page_end":   int,
-      "word_count": int,
-      "token_est":  int,
-      "text":       str          ← normalised + diacritized
-    },
-    …
-  ]
-}
+  *_phase1_raw.txt   — text straight from ingestor/OCR, before any processing.
+                       Use this to debug extraction issues in isolation.
 
-Plain text
-──────────
-A human-readable file with chapter markers and chunk separators,
-suitable as a diff-able audit trail or direct downstream input.
+  *_phase1.json      — fully processed chunks with metadata (machine-readable).
+
+  *_phase1.txt       — processed chunks, human-readable with separators.
+
+Having the raw snapshot means you can diff raw vs processed to verify each
+processing step (normalisation, diacritization) independently.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,59 +26,78 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_CHUNK_SEPARATOR = "\n" + "─" * 60 + "\n"
+_CHUNK_SEP  = "\n" + "─" * 60 + "\n"
+_PAGE_SEP   = "\n" + "═" * 60 + "\n"
 
 
 class OutputWriter:
     """
     Writes Phase 1 output to disk.
 
-    Args:
-        output_dir: Directory where output files are written.
-                    Created automatically if it does not exist.
+    Returns (json_path, txt_path, raw_txt_path).
     """
 
     def __init__(self, output_dir: str | Path = "output"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------ #
-    #  Public API                                                          #
-    # ------------------------------------------------------------------ #
-
     def write(
         self,
         ingestion: IngestionResult,
         chunks: list[Chunk],
         stem: str | None = None,
-    ) -> tuple[Path, Path]:
-        """
-        Write both output formats and return (json_path, txt_path).
+    ) -> tuple[Path, Path, Path]:
+        base         = stem or Path(ingestion.source_path).stem
+        raw_txt_path = self.output_dir / f"{base}_phase1_raw.txt"
+        json_path    = self.output_dir / f"{base}_phase1.json"
+        txt_path     = self.output_dir / f"{base}_phase1.txt"
 
-        Args:
-            ingestion: Result from PDFIngestor.ingest().
-            chunks:    Result from SemanticChunker.chunk_pages().
-            stem:      Base filename without extension. Defaults to PDF stem.
-        """
-        base = stem or Path(ingestion.source_path).stem
-        json_path = self.output_dir / f"{base}_phase1.json"
-        txt_path  = self.output_dir / f"{base}_phase1.txt"
-
+        self._write_raw_txt(ingestion, raw_txt_path)
         self._write_json(ingestion, chunks, json_path)
         self._write_txt(ingestion, chunks, txt_path)
 
-        logger.info("Phase 1 output written → %s, %s", json_path, txt_path)
-        return json_path, txt_path
+        logger.info("Phase 1 output → raw: %s | json: %s | txt: %s",
+                    raw_txt_path, json_path, txt_path)
+        return json_path, txt_path, raw_txt_path
 
     # ------------------------------------------------------------------ #
-    #  JSON                                                                #
+    #  Raw snapshot (pre-processing)                                       #
+    # ------------------------------------------------------------------ #
+
+    def _write_raw_txt(self, ingestion: IngestionResult, path: Path) -> None:
+        """
+        Writes the text exactly as it came out of PyMuPDF / OCR,
+        before normalisation, diacritization, or any post-processing.
+        One section per page, clearly labelled.
+        """
+        src  = Path(ingestion.source_path).name
+        meta = ingestion.metadata
+        lines = [
+            f"# Phase 1 RAW EXTRACT — {src}",
+            f"# PDF Type   : {ingestion.pdf_type}",
+            f"# Total pages: {ingestion.total_pages}",
+            f"# Title      : {meta.get('title', 'N/A')}",
+            f"# Author     : {meta.get('author', 'N/A')}",
+            f"# NOTE       : This is the text BEFORE normalisation or diacritization.",
+            f"#              Compare with *_phase1.txt to audit processing quality.",
+            "",
+        ]
+
+        for page in ingestion.pages:
+            lines.append(
+                f"[Page {page.page_number:03d} | {page.pdf_type}]"
+            )
+            lines.append(page.raw_text_pre or "(empty)")
+            lines.append(_PAGE_SEP)
+
+        path.write_text("\n".join(lines), encoding="utf-8")
+
+    # ------------------------------------------------------------------ #
+    #  JSON (processed)                                                    #
     # ------------------------------------------------------------------ #
 
     def _write_json(
-        self,
-        ingestion: IngestionResult,
-        chunks: list[Chunk],
-        path: Path,
+        self, ingestion: IngestionResult, chunks: list[Chunk], path: Path
     ) -> None:
         payload = {
             "source":      ingestion.source_path,
@@ -103,6 +105,16 @@ class OutputWriter:
             "total_pages": ingestion.total_pages,
             "metadata":    ingestion.metadata,
             "chunk_count": len(chunks),
+            # Per-page raw snapshot embedded in JSON for programmatic diffing
+            "pages_raw": [
+                {
+                    "page_number": p.page_number,
+                    "pdf_type":    p.pdf_type,
+                    "raw_pre":     p.raw_text_pre,
+                    "raw_post":    p.raw_text,
+                }
+                for p in ingestion.pages
+            ],
             "chunks": [
                 {
                     "chunk_id":   c.chunk_id,
@@ -122,22 +134,21 @@ class OutputWriter:
         )
 
     # ------------------------------------------------------------------ #
-    #  Plain text                                                          #
+    #  Plain text (processed)                                              #
     # ------------------------------------------------------------------ #
 
     def _write_txt(
-        self,
-        ingestion: IngestionResult,
-        chunks: list[Chunk],
-        path: Path,
+        self, ingestion: IngestionResult, chunks: list[Chunk], path: Path
     ) -> None:
+        src  = Path(ingestion.source_path).name
+        meta = ingestion.metadata
         lines = [
-            f"# Phase 1 Output — {Path(ingestion.source_path).name}",
+            f"# Phase 1 Output — {src}",
             f"# PDF Type   : {ingestion.pdf_type}",
             f"# Total pages: {ingestion.total_pages}",
             f"# Chunks     : {len(chunks)}",
-            f"# Title      : {ingestion.metadata.get('title', 'N/A')}",
-            f"# Author     : {ingestion.metadata.get('author', 'N/A')}",
+            f"# Title      : {meta.get('title', 'N/A')}",
+            f"# Author     : {meta.get('author', 'N/A')}",
             "",
         ]
 
@@ -148,6 +159,6 @@ class OutputWriter:
                 f"{chunk.word_count} words / ~{chunk.token_est} tokens]"
             )
             lines.append(chunk.text)
-            lines.append(_CHUNK_SEPARATOR)
+            lines.append(_CHUNK_SEP)
 
         path.write_text("\n".join(lines), encoding="utf-8")
