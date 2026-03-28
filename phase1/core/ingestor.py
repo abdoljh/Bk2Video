@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 PDFType = Literal["digital", "scanned", "mixed"]
 
 _DIGITAL_CHARS_THRESHOLD = 100
-_LINE_TOL_PT = 2.0
+_LINE_TOL_PT = 4.0
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,80}$')
 
@@ -207,12 +207,14 @@ class PDFIngestor:
         buffer = visual_lines[0]
 
         for line in visual_lines[1:]:
-            if is_heading(buffer):
+            if is_heading(buffer) and paragraphs:
+                # Only break on heading if we already have content above it —
+                # prevents the first line from emitting an empty leading paragraph.
                 paragraphs.extend([buffer, ""])
                 buffer = line
-            elif is_heading(line):
-                if buffer:
-                    paragraphs.extend([buffer, ""])
+            elif is_heading(line) and buffer.strip():
+                # Upcoming line is a heading → close current paragraph first.
+                paragraphs.extend([buffer, ""])
                 buffer = line
             elif _SENT_TERMINAL.search(buffer):
                 paragraphs.append(buffer)
@@ -221,6 +223,11 @@ class PDFIngestor:
                 buffer = buffer + " " + line
 
         paragraphs.append(buffer)
+        # Remove leading/trailing blank entries
+        while paragraphs and not paragraphs[0].strip():
+            paragraphs.pop(0)
+        while paragraphs and not paragraphs[-1].strip():
+            paragraphs.pop()
         return "\n".join(paragraphs)
 
     @staticmethod
