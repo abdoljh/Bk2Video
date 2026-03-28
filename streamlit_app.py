@@ -221,10 +221,12 @@ if uploaded:
                 result = Phase1Pipeline(config=cfg, on_progress=on_progress).run(tmp_path)
 
                 # Persist bytes to session state before temp dir is cleaned up
-                st.session_state["json_bytes"] = result.json_path.read_bytes()
-                st.session_state["txt_bytes"]  = result.txt_path.read_bytes()
-                st.session_state["json_name"]  = result.json_path.name
-                st.session_state["txt_name"]   = result.txt_path.name
+                st.session_state["json_bytes"]    = result.json_path.read_bytes()
+                st.session_state["txt_bytes"]     = result.txt_path.read_bytes()
+                st.session_state["raw_txt_bytes"] = result.raw_txt_path.read_bytes()
+                st.session_state["json_name"]     = result.json_path.name
+                st.session_state["txt_name"]      = result.txt_path.name
+                st.session_state["raw_txt_name"]  = result.raw_txt_path.name
                 st.session_state["result_meta"] = {
                     "pdf_type":    result.pdf_type,
                     "total_pages": result.total_pages,
@@ -287,15 +289,20 @@ if "result_meta" in st.session_state:
 
     # Downloads
     st.markdown("#### 📥 Downloads")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        st.download_button("⬇ Download JSON", data=st.session_state["json_bytes"],
+        st.download_button("⬇ JSON (processed)", data=st.session_state["json_bytes"],
                            file_name=st.session_state["json_name"],
                            mime="application/json", use_container_width=True)
     with c2:
-        st.download_button("⬇ Download Plain Text", data=st.session_state["txt_bytes"],
+        st.download_button("⬇ Text (processed)", data=st.session_state["txt_bytes"],
                            file_name=st.session_state["txt_name"],
                            mime="text/plain", use_container_width=True)
+    with c3:
+        st.download_button("⬇ Text (raw extract)", data=st.session_state.get("raw_txt_bytes", b""),
+                           file_name=st.session_state.get("raw_txt_name", "raw.txt"),
+                           mime="text/plain", use_container_width=True,
+                           help="Text straight from PyMuPDF/OCR before any normalisation")
 
     # Chunk preview
     st.markdown("#### 🔍 Chunk Preview")
@@ -313,6 +320,18 @@ if "result_meta" in st.session_state:
             </div>""",
             unsafe_allow_html=True,
         )
+
+    with st.expander("🔬 Compare: raw extract vs processed"):
+        st.caption("Left = straight from PyMuPDF/OCR · Right = after normalisation & diacritization")
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            st.markdown("**Raw extract**")
+            raw_txt = st.session_state.get("raw_txt_bytes", b"").decode("utf-8", errors="replace")
+            st.text_area("raw", raw_txt[:4000], height=300, label_visibility="collapsed")
+        with rc2:
+            st.markdown("**Processed**")
+            proc_txt = st.session_state.get("txt_bytes", b"").decode("utf-8", errors="replace")
+            st.text_area("proc", proc_txt[:4000], height=300, label_visibility="collapsed")
 
     with st.expander("🔎 Inspect raw JSON"):
         st.json(json.loads(st.session_state["json_bytes"]))
