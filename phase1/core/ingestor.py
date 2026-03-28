@@ -32,7 +32,7 @@ PDFType = Literal["digital", "scanned", "mixed"]
 _DIGITAL_CHARS_THRESHOLD = 100
 _LINE_TOL_PT = 4.0
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
-_IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,80}$')
+_IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,55}$')  # 55 = max genuine heading length
 
 
 @dataclass
@@ -188,10 +188,30 @@ class PDFIngestor:
             lines.append(current_line)
 
         # Sort each line's spans descending-x → RTL order
+        # Diacritic-only spans (ً ٌ ٍ etc.) are appended to the previous span.
+        # Arabic comma ، is repositioned: X ، Y → X، Y and ، X → X،
+        _DIACRITIC_CP = set(range(0x0610, 0x061B)) | set(range(0x064B, 0x0653)) | {0x0670}
+
+        def is_diacritic_only(s: str) -> bool:
+            return bool(s) and all(ord(c) in _DIACRITIC_CP for c in s.strip())
+
+        def fix_comma(line: str) -> str:
+            # Move ، from before a word to after the preceding word
+            line = re.sub(r'(\S+)\s+،\s*(\S)', r'\1، \2', line)
+            line = re.sub(r'^،\s*(\S+)', r'\1،', line)
+            return line
+
         visual_lines: list[str] = []
         for line_spans in lines:
             line_spans.sort(key=lambda t: t[0], reverse=True)
-            line_text = " ".join(t for _, t in line_spans).strip()
+            # Merge diacritic-only spans into previous span
+            merged: list[tuple[float, str]] = []
+            for x, t in line_spans:
+                if is_diacritic_only(t) and merged:
+                    merged[-1] = (merged[-1][0], merged[-1][1] + t)
+                else:
+                    merged.append((x, t))
+            line_text = fix_comma(" ".join(t for _, t in merged).strip())
             if line_text:
                 visual_lines.append(line_text)
 
@@ -201,7 +221,7 @@ class PDFIngestor:
 
         def is_heading(s: str) -> bool:
             s = s.strip()
-            return bool(_IS_HEADING.match(s)) and len(s) <= 80
+            return bool(_IS_HEADING.match(s)) and len(s) <= 55
 
         paragraphs: list[str] = []
         buffer = visual_lines[0]
