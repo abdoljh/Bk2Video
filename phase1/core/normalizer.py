@@ -157,4 +157,9 @@ class ArabicTextNormalizer:
                 text = pat.sub("  ", text)
             else:
                 text = pat.sub("", text)
+        # Remove space before period/full-stop
+        text = re.sub(r'\s+\.(?=\s|$)', '.', text)
+        # Join tanwin (ً ٌ ٍ) separated from its alef/alef-maqsura by a space
+        # e.g. "خصوصً ا" → "خصوصًا"
+        text = re.sub(r'([\u064B\u064C\u064D])\s+([\u0627\u0649])', r'\1\2', text)
         return text

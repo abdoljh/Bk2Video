@@ -236,8 +236,13 @@ class PDFIngestor:
         if not visual_lines:
             return ""
 
+        _DIAC_ONLY_LINE = re.compile(r'^[؀-ًؕ-ٰٟاآأإ\s]+$')
+
         def is_heading(s: str) -> bool:
             s = s.strip()
+            # Never treat diacritic-only content as a heading
+            if _DIAC_ONLY_LINE.match(s):
+                return False
             return bool(_IS_HEADING.match(s)) and len(s) <= 55
 
         paragraphs: list[str] = []
