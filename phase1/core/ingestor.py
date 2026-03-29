@@ -201,17 +201,34 @@ class PDFIngestor:
             line = re.sub(r'^،\s*(\S+)', r'\1،', line)
             return line
 
+        def clean_punct(line: str) -> str:
+            """Remove duplicate punctuation produced by comma-fix + existing punct."""
+            line = re.sub(r'،،+', '،', line)
+            line = re.sub(r'\.{2,}', '.', line)
+            return line
+
         visual_lines: list[str] = []
         for line_spans in lines:
             line_spans.sort(key=lambda t: t[0], reverse=True)
-            # Merge diacritic-only spans into previous span
+            spans = [(x, t) for x, t in line_spans]
+
+            # Two-pass diacritic merge:
+            # Pass 1 — append to previous if possible
             merged: list[tuple[float, str]] = []
-            for x, t in line_spans:
-                if is_diacritic_only(t) and merged:
-                    merged[-1] = (merged[-1][0], merged[-1][1] + t)
+            pending_diac = ""   # diacritic with no previous span yet
+            for x, t in spans:
+                if is_diacritic_only(t):
+                    if merged:
+                        merged[-1] = (merged[-1][0], merged[-1][1] + t)
+                    else:
+                        pending_diac += t   # save for prepending to next word
                 else:
-                    merged.append((x, t))
-            line_text = fix_comma(" ".join(t for _, t in merged).strip())
+                    merged.append((x, pending_diac + t))
+                    pending_diac = ""
+            if pending_diac and merged:
+                merged[-1] = (merged[-1][0], merged[-1][1] + pending_diac)
+
+            line_text = clean_punct(fix_comma(" ".join(t for _, t in merged).strip()))
             if line_text:
                 visual_lines.append(line_text)
 
