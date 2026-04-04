@@ -61,8 +61,7 @@ _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,55}$')
 
 # Lam-alef obligatory ligature pairs → Unicode Presentation Form placeholders.
-# Order matters: place specific alef variants before the plain alef so the
-# most-specific replacement is tried first.
+# Kept as module-level reference; the active fix uses per-character x comparison.
 _LAM_ALEF_PF: list[tuple[str, str]] = [
     ('\u0644\u0622', '\uFEF5'),   # ل + آ  (madda above)
     ('\u0644\u0623', '\uFEF7'),   # ل + أ  (hamza above)
@@ -71,25 +70,60 @@ _LAM_ALEF_PF: list[tuple[str, str]] = [
 ]
 
 
-def _fix_lamalef_visual_span(text: str) -> str:
+def _fix_lamalef_visual_span(
+    chars: list[str],
+    x_origins: list[float],
+) -> str:
     """
-    Correct lam-alef ligature pairs in a visual-order (left→right) Arabic span.
+    Correct lam-alef ligature pairs in a visual-order (ascending-x) Arabic span.
 
-    In visual-order PDF glyph runs, lam-alef obligatory ligatures are often
-    kept in logical order (ل then alef-variant) even though all other chars are
-    in reversed visual order.  A plain reversal would flip these pairs and
-    corrupt the text.
+    In an ascending-x (left→right) visual stream, PDF generators sometimes
+    preserve obligatory lam-alef ligatures (ل+ا, ل+أ, ل+إ, ل+آ) in their
+    *logical* order: lam is stored BEFORE the alef-variant even though the alef
+    has a higher screen-x and would normally appear first in an ascending-x run.
 
-    Hex-Placeholder Technique:
-      1. Replace each ل+alef-variant with a single Presentation Form code point
-         so it survives reversal as ONE character.
-      2. Reverse the entire span string (visual → logical order).
-      3. NFKD-decompose to expand presentation forms back to standard sequences
-         in correct logical order.
+    Distinguishing true preservation from a plain ل+ا adjacency:
+      • True preservation  →  x(lam) > x(alef-variant)
+        (lam is more to the right on screen but stored first = ligature preserved)
+      • Plain adjacency    →  x(lam) ≤ x(alef-variant)
+        (lam is naturally to the left of the alef; plain reversal handles it)
+
+    For true-preservation pairs:
+      1. Replace with a single Presentation Form code point (U+FEF5–FEFB) so
+         the pair survives reversal as ONE character.
+      2. Reverse the entire char list (visual → logical order).
+      3. NFKD-decompose to restore the standard ل+alef sequence in correct
+         logical order.
+
+    Plain-adjacency pairs are handled correctly by step 2 alone.
     """
-    for src, dst in _LAM_ALEF_PF:
-        text = text.replace(src, dst)
-    return unicodedata.normalize('NFKD', text[::-1])
+    _ALEF_TO_PF = {
+        '\u0627': '\uFEFB',   # ا
+        '\u0622': '\uFEF5',   # آ
+        '\u0623': '\uFEF7',   # أ
+        '\u0625': '\uFEF9',   # إ
+    }
+    _LAM = '\u0644'
+
+    n = len(chars)
+    result: list[str | None] = list(chars)
+
+    i = 0
+    while i < n - 1:
+        if result[i] == _LAM:
+            nxt = result[i + 1]
+            if nxt is not None and nxt in _ALEF_TO_PF:
+                # Apply FEFB only when lam has HIGHER screen-x than the alef
+                # (true preservation: lam stored first despite being more rightward)
+                if x_origins[i] > x_origins[i + 1]:
+                    result[i]     = _ALEF_TO_PF[nxt]
+                    result[i + 1] = None   # consumed into the placeholder
+                    i += 2
+                    continue
+        i += 1
+
+    filtered = [c for c in result if c is not None]
+    return unicodedata.normalize('NFKD', ''.join(filtered[::-1]))
 
 
 @dataclass
@@ -215,19 +249,27 @@ class PDFIngestor:
                     if not span_chars:
                         continue
 
-                    raw_chars = "".join(span_chars)
+                    # Majority-vote visual-order detection:
+                    # count consecutive x-differences that are clearly ascending
+                    # (visual left→right) vs clearly descending (logical RTL).
+                    has_arabic = any('\u0600' <= c <= '\u06FF' for c in span_chars)
+                    if len(x_origins) >= 2 and has_arabic:
+                        diffs = [
+                            x_origins[j + 1] - x_origins[j]
+                            for j in range(len(x_origins) - 1)
+                        ]
+                        n_pos = sum(1 for d in diffs if d >  0.5)
+                        n_neg = sum(1 for d in diffs if d < -0.5)
+                        is_visual_order = n_pos > n_neg
+                    else:
+                        is_visual_order = False
 
-                    # Detect visual-order span: x-coordinates increase left→right
-                    # (opposite of Arabic RTL reading direction) and the span
-                    # contains at least one Arabic character.
-                    is_visual_order = (
-                        len(x_origins) > 1
-                        and x_origins[-1] > x_origins[0]
-                        and any('\u0600' <= c <= '\u06FF' for c in raw_chars)
-                    )
                     if is_visual_order:
-                        # Protect lam-alef pairs, reverse, NFKD-decompose back.
-                        raw_chars = _fix_lamalef_visual_span(raw_chars)
+                        # Per-char x comparison protects only true-preservation
+                        # lam-alef pairs; plain reversal handles the rest.
+                        raw_chars = _fix_lamalef_visual_span(span_chars, x_origins)
+                    else:
+                        raw_chars = "".join(span_chars)
 
                     span_text = unicodedata.normalize("NFKC", raw_chars)
                     if not span_text.strip():

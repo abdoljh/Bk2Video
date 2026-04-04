@@ -83,8 +83,14 @@ def fix_article(word: str) -> str:
 
     Standalone "ال" → "لا"  (negation/emphasis particle).
 
-    Known limitation: inner root-level لا encoding in compound words like
-    الإعلامية cannot be fixed without a lexicon (produces الإعالمية).
+    Rule C — single-char connector/preposition prefix + article error:
+      If none of the above rules apply and the word begins with one of
+      و ب ل ك ف س, recursively apply fix_article to the remainder.
+      Fixes: واإلعالمية→والإعالمية, بالأسباب stays correct, etc.
+
+    Note: word-internal لا inversion (e.g. إعالمية vs إعلامية) is now
+    primarily handled at span level in ingestor.py via the Hex-Placeholder
+    Technique with per-character x-coordinate comparison.
     """
     if len(word) < 2:
         return word
@@ -109,7 +115,20 @@ def fix_article(word: str) -> str:
     if len(c) == 2 and c[0] == _ALEF and c[1] == _LAM:
         c[0], c[1] = c[1], c[0]
 
-    return ''.join(c)
+    result = ''.join(c)
+
+    # Rule C — single-char Arabic connector/preposition prefix + article pattern.
+    # e.g. "واإلعالمية" → و + fix_article("اإلعالمية") → "والإعالمية"
+    #      "بالأسباب"  → ب + fix_article("الأسباب")   → "بالأسباب"
+    # Only recurses when no other rule already changed the word (avoids
+    # double-application) and the word is long enough to contain a real article.
+    _CONNECTORS = frozenset('\u0648\u0628\u0644\u0643\u0641\u0633')  # و ب ل ك ف س
+    if result == word and len(word) >= 4 and word[0] in _CONNECTORS:
+        inner = fix_article(word[1:])
+        if inner != word[1:]:
+            return word[0] + inner
+
+    return result
 
 
 class ArabicTextNormalizer:
