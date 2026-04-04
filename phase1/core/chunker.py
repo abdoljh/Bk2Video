@@ -59,7 +59,7 @@ class SemanticChunker:
         self,
         max_tokens:      int = 1500,
         overlap_tokens:  int = 200,
-        min_chunk_words: int = 40,
+        min_chunk_words: int = 8,
     ):
         self.max_tokens      = max_tokens
         self.overlap_tokens  = overlap_tokens
