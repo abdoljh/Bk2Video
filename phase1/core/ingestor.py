@@ -257,18 +257,31 @@ class PDFIngestor:
             if not merged:
                 continue
 
-            # Join spans: insert space only when visual gap exceeds threshold
-            # In RTL sorted order, merged[i] is to the RIGHT of merged[i+1].
-            # Gap = merged[i].x_left - merged[i+1].x_right
-            # (right span's left edge minus left span's right edge)
-            parts = [merged[0][2]]
-            for i in range(1, len(merged)):
-                prev_x_left  = merged[i-1][0]   # left edge of previous (rightward) span
-                curr_x_right = merged[i][1]      # right edge of current (leftward) span
-                gap = prev_x_left - curr_x_right
-                if gap >= _WORD_GAP_PT:
-                    parts.append(" ")
-                parts.append(merged[i][2])
+            # Join spans: insert space only when visual gap exceeds threshold.
+            # When spans are adjacent (gap < threshold), also check if the
+            # RIGHT-side span (sorted first = higher x) is a diacritic/tanwin-alef.
+            # If so, it belongs AFTER the left-side span (append, not prepend).
+            # e.g. اًّ (high x) + ضروري (low x) → gap=0 → join as ضروريًّا not اًّضروري
+            parts: list[str] = []
+            skip_next = False
+            for i in range(len(merged)):
+                if skip_next:
+                    skip_next = False
+                    continue
+                x_l, x_r, text = merged[i]
+                if i + 1 < len(merged):
+                    next_x_l, next_x_r, next_text = merged[i + 1]
+                    gap = x_l - next_x_r
+                    if gap < _WORD_GAP_PT and is_diacritic_only(text):
+                        # This span (rightmost) is diacritic — append to next word
+                        parts.append(next_text + text)
+                        skip_next = True
+                        continue
+                    elif gap >= _WORD_GAP_PT:
+                        parts.append(text)
+                        parts.append(" ")
+                        continue
+                parts.append(text)
 
             line_text = clean_punct(fix_comma("".join(parts).strip()))
             if line_text:
