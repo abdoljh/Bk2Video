@@ -3,21 +3,30 @@ Phase 1 — ArabicTextNormalizer
 Post-extraction text normalisation.
 
 Applies:
-  1. fix_article()  — repairs lam-alef encoding errors from PDF font ToUnicode tables.
+  1. fix_article()  — word-level fallback for residual lam-alef article errors.
   2. Scanned-only:  arabic-reshaper + python-bidi (OCR output only).
   3. Noise cleaning — lone page numbers, zero-width chars, excessive whitespace.
 
-fix_article rules
-─────────────────
-Arabic PDF fonts frequently encode the lam-alef ligature glyph incorrectly,
-producing words like:
-  امل   instead of  الم   (plain alef + consonant + lam → swap consonant and lam)
-  اآلن  instead of  الآن  (alef + madda-alef + lam → swap last two)
+Primary lam-alef fix (Hex-Placeholder Technique) — now in ingestor.py
+──────────────────────────────────────────────────────────────────────
+The main fix for lam-alef ligature inversions is applied at the span level
+inside PDFIngestor._extract_rtl_text(), before span-level RTL sorting.
+For each span whose x-coordinates indicate visual (left→right) character
+order, _fix_lamalef_visual_span() is called:
+  1. ل+alef-variant pairs → Presentation Form single code points (U+FEF5–FEFB)
+  2. Reverse the span string
+  3. NFKD-decompose back to logical ل+alef order
+This correctly handles all occurrences within a word, including word-internal
+lam-alef pairs (e.g. إعالمية → إعلامية) that the word-level rules below miss.
+
+fix_article rules (fallback)
+─────────────────────────────
+Catches residual cases not covered by the span-level fix — mainly PDFs whose
+fonts use non-visual encoding with incorrect ToUnicode table mappings:
+  امل   instead of  الم   (plain alef + consonant + lam → swap 1 and 2)
+  اآلن  instead of  الآن  (alef + madda-alef + lam → swap 1 and 2)
   ألدوات instead of الأدوات (hamza-alef + lam + consonant → insert plain alef)
   ألي    instead of لأي    (short hamza-alef + lam → swap)
-
-Known limitation: the root-internal case اإلعالمية → الإعالمية (not الإعلامية)
-cannot be fixed without a lexicon. The output is readable.
 """
 
 from __future__ import annotations
