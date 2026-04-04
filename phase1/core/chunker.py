@@ -135,13 +135,19 @@ class SemanticChunker:
             return [("full_book", text)]
 
         sections = []
+        # Include any text that appears before the first heading
+        pre = text[:matches[0].start()].strip()
+        if pre:
+            sections.append(("intro", pre))
         for i, m in enumerate(matches):
             title = m.group(1).strip()
             start = m.end()
             end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            sections.append((title, text[start:end]))
+            section_text = text[start:end].strip()
+            if section_text:
+                sections.append((title, section_text))
 
-        return sections
+        return sections if sections else [("full_book", text)]
 
     def _split_to_token_limit(self, text: str) -> list[str]:
         """

@@ -57,8 +57,14 @@ PDFType = Literal["digital", "scanned", "mixed"]
 _DIGITAL_CHARS_THRESHOLD = 100
 _LINE_TOL_PT  = 4.0    # y-tolerance for grouping spans onto same line
 _WORD_GAP_PT  = 3.0    # minimum gap (pts) between spans to insert a space
+_DIAC_EPSILON = 3.0    # pt: demote diacritics in x-sort so they follow base letters
+_DIAC_SPAN_EPSILON = 5.0  # pt: demote single-char diacritic spans in RTL span sort
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?![\u064B-\u065F\u0670])(?!.*[.،؛؟!]).{4,55}$')
+# Arabic diacritics (combining marks) codepoint set – used in multiple places
+_DIACRITIC_CP = (
+    set(range(0x0610, 0x061B)) | set(range(0x064B, 0x0653)) | {0x0670}
+)
 
 # Lam-alef obligatory ligature pairs → Unicode Presentation Form placeholders.
 # Kept as module-level reference; the active fix uses per-character x comparison.
@@ -249,25 +255,23 @@ class PDFIngestor:
                     if not span_chars:
                         continue
 
-                    # Majority-vote visual-order detection:
-                    # count consecutive x-differences that are clearly ascending
-                    # (visual left→right) vs clearly descending (logical RTL).
+                    # Sort chars by x DESC so both visual-order and logical-order
+                    # spans yield correct logical Unicode order.  Diacritics are
+                    # demoted by _DIAC_EPSILON pt so they always land AFTER their
+                    # base letter (which shares the same x position) rather than
+                    # before it, matching Unicode combining-mark convention.
                     has_arabic = any('\u0600' <= c <= '\u06FF' for c in span_chars)
-                    if len(x_origins) >= 2 and has_arabic:
-                        diffs = [
-                            x_origins[j + 1] - x_origins[j]
-                            for j in range(len(x_origins) - 1)
-                        ]
-                        n_pos = sum(1 for d in diffs if d >  0.5)
-                        n_neg = sum(1 for d in diffs if d < -0.5)
-                        is_visual_order = n_pos > n_neg
-                    else:
-                        is_visual_order = False
-
-                    if is_visual_order:
-                        # Per-char x comparison protects only true-preservation
-                        # lam-alef pairs; plain reversal handles the rest.
-                        raw_chars = _fix_lamalef_visual_span(span_chars, x_origins)
+                    if has_arabic and len(span_chars) > 1:
+                        order = sorted(
+                            range(len(span_chars)),
+                            key=lambda k: (
+                                -round(x_origins[k]
+                                       - _DIAC_EPSILON * (ord(span_chars[k]) in _DIACRITIC_CP),
+                                       1),   # 0.1 pt rounding collapses sub-pixel noise
+                                k,           # lower original index first for equal keys
+                            ),
+                        )
+                        raw_chars = "".join(span_chars[k] for k in order)
                     else:
                         raw_chars = "".join(span_chars)
 
@@ -277,7 +281,14 @@ class PDFIngestor:
 
                     x_left  = min(x_origins)
                     x_right = max(x_rights)
-                    y_rep   = y_origins[0]
+                    # Use y of first non-diacritic char so that spans whose first
+                    # PDF char is a diacritic (with a shifted baseline) still get
+                    # grouped onto the correct text line.
+                    non_diac_ys = [
+                        y_origins[k] for k in range(len(span_chars))
+                        if ord(span_chars[k]) not in _DIACRITIC_CP
+                    ]
+                    y_rep = non_diac_ys[0] if non_diac_ys else y_origins[0]
                     span_entries.append((x_left, x_right, y_rep, span_text))
 
         if not span_entries:
@@ -301,8 +312,6 @@ class PDFIngestor:
             lines.append(current_line)
 
         # ── Per line: sort spans RTL, merge diacritics, join with gap ──
-        _DIACRITIC_CP = set(range(0x0610, 0x061B)) | set(range(0x064B, 0x0653)) | {0x0670}
-
         _ALEF_CHARS = {'\u0627', '\u0622', '\u0623', '\u0625'}
 
         def is_diacritic_only(s: str) -> bool:
@@ -334,8 +343,14 @@ class PDFIngestor:
         visual_lines: list[str] = []
 
         for line_spans in lines:
-            # Sort descending by left-x → RTL reading order
-            line_spans.sort(key=lambda t: t[0], reverse=True)
+            # Sort descending by left-x → RTL reading order.
+            # Diacritic-only spans are demoted by _DIAC_SPAN_EPSILON so they
+            # sort just AFTER the word span whose x range they overlap, rather
+            # than accidentally preceding it due to a tiny x difference.
+            line_spans.sort(
+                key=lambda t: t[0] - (_DIAC_SPAN_EPSILON if is_diacritic_only(t[2]) else 0.0),
+                reverse=True,
+            )
 
             # Merge diacritic-only spans into adjacent word spans
             # (x_left, x_right, text)
