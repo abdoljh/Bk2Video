@@ -58,7 +58,7 @@ _DIGITAL_CHARS_THRESHOLD = 100
 _LINE_TOL_PT  = 4.0    # y-tolerance for grouping spans onto same line
 _WORD_GAP_PT  = 3.0    # minimum gap (pts) between spans to insert a space
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
-_IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,55}$')
+_IS_HEADING    = re.compile(r'^(?![\u064B-\u065F\u0670])(?!.*[.،؛؟!]).{4,55}$')
 
 # Lam-alef obligatory ligature pairs → Unicode Presentation Form placeholders.
 # Kept as module-level reference; the active fix uses per-character x comparison.
@@ -350,7 +350,11 @@ class PDFIngestor:
                     else:
                         pending_diac += t
                 else:
-                    merged.append((x_l, x_r, pending_diac + t))
+                    _ALEF_CHARS = '\u0627\u0622\u0623\u0625\u0671'
+                    if pending_diac and pending_diac[0] in _ALEF_CHARS:
+                        merged.append((x_l, x_r, t + pending_diac))
+                    else:
+                        merged.append((x_l, x_r, pending_diac + t))
                     pending_diac = ""
 
             if pending_diac and merged:
