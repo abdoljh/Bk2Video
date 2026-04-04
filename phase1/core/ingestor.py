@@ -21,6 +21,22 @@ Algorithm:
   5. Merge diacritic-only spans to their adjacent word span.
   6. Fix comma positions and duplicate punctuation.
   7. Reconstruct paragraphs with heading detection.
+
+Lam-alef ligature fix — Hex-Placeholder Technique
+──────────────────────────────────────────────────
+Arabic PDF generators often preserve the obligatory lam-alef ligatures
+(ل+ا, ل+أ, ل+إ, ل+آ) in their *logical* order even inside a visual-order
+glyph run.  When the span characters are reversed to recover logical reading
+order, these pairs flip (لا → ال), corrupting the article ال and word-internal
+alef vowels (e.g. إعلامية extracted as إعالمية).
+
+Fix — applied per-span whenever x-coordinates confirm visual (left→right) order:
+  1. Replace each ل+alef-variant pair with its single Presentation Form code
+     point (U+FEF5–FEFB) so the pair is treated as ONE character during reversal.
+  2. Reverse the span character string.
+  3. NFKD-decompose to restore the standard ل+alef sequence in correct
+     logical order (e.g. U+FEFB → U+0644 U+0627 = ل + ا).
+  4. The caller finishes with NFKC to re-compose any canonical forms.
 """
 
 from __future__ import annotations
@@ -43,6 +59,37 @@ _LINE_TOL_PT  = 4.0    # y-tolerance for grouping spans onto same line
 _WORD_GAP_PT  = 3.0    # minimum gap (pts) between spans to insert a space
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?!.*[.،؛؟!]).{4,55}$')
+
+# Lam-alef obligatory ligature pairs → Unicode Presentation Form placeholders.
+# Order matters: place specific alef variants before the plain alef so the
+# most-specific replacement is tried first.
+_LAM_ALEF_PF: list[tuple[str, str]] = [
+    ('\u0644\u0622', '\uFEF5'),   # ل + آ  (madda above)
+    ('\u0644\u0623', '\uFEF7'),   # ل + أ  (hamza above)
+    ('\u0644\u0625', '\uFEF9'),   # ل + إ  (hamza below)
+    ('\u0644\u0627', '\uFEFB'),   # ل + ا  (plain alef)
+]
+
+
+def _fix_lamalef_visual_span(text: str) -> str:
+    """
+    Correct lam-alef ligature pairs in a visual-order (left→right) Arabic span.
+
+    In visual-order PDF glyph runs, lam-alef obligatory ligatures are often
+    kept in logical order (ل then alef-variant) even though all other chars are
+    in reversed visual order.  A plain reversal would flip these pairs and
+    corrupt the text.
+
+    Hex-Placeholder Technique:
+      1. Replace each ل+alef-variant with a single Presentation Form code point
+         so it survives reversal as ONE character.
+      2. Reverse the entire span string (visual → logical order).
+      3. NFKD-decompose to expand presentation forms back to standard sequences
+         in correct logical order.
+    """
+    for src, dst in _LAM_ALEF_PF:
+        text = text.replace(src, dst)
+    return unicodedata.normalize('NFKD', text[::-1])
 
 
 @dataclass
@@ -168,7 +215,21 @@ class PDFIngestor:
                     if not span_chars:
                         continue
 
-                    span_text = unicodedata.normalize("NFKC", "".join(span_chars))
+                    raw_chars = "".join(span_chars)
+
+                    # Detect visual-order span: x-coordinates increase left→right
+                    # (opposite of Arabic RTL reading direction) and the span
+                    # contains at least one Arabic character.
+                    is_visual_order = (
+                        len(x_origins) > 1
+                        and x_origins[-1] > x_origins[0]
+                        and any('\u0600' <= c <= '\u06FF' for c in raw_chars)
+                    )
+                    if is_visual_order:
+                        # Protect lam-alef pairs, reverse, NFKD-decompose back.
+                        raw_chars = _fix_lamalef_visual_span(raw_chars)
+
+                    span_text = unicodedata.normalize("NFKC", raw_chars)
                     if not span_text.strip():
                         continue
 
