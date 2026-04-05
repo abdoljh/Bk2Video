@@ -63,6 +63,10 @@ _CORRUPT_LATIN1_THRESHOLD  = 0.05  # Latin-1 (U+0080–00FF) fraction above whic
                                    # signal a PDF font with a custom glyph encoding
                                    # that maps Arabic glyphs to extended-Latin code
                                    # points — yielding garbage from any text extractor.
+# U+063C–063F: Arabic Extended letters (ؼ ؽ ؾ ؿ) that virtually never appear in
+# standard Modern Arabic text.  Their presence signals an internal Arabic block
+# remapping (a different corruption from Latin-1; detected in e.g. Sample 6).
+_CORRUPT_ARABIC_EXT        = frozenset(range(0x063C, 0x0640))
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?![\u064B-\u065F\u0670])(?!.*[.،؛؟!]).{4,55}$')
 # Arabic diacritics (combining marks) codepoint set – used in multiple places
@@ -173,9 +177,12 @@ class PDFIngestor:
             is_digital = len(probe_text) >= _DIGITAL_CHARS_THRESHOLD
 
             # Even if the page has plenty of text, route to OCR when the font
-            # encoding is corrupted (Latin-1 chars in an Arabic document signal
-            # a custom CMap that maps Arabic glyphs to extended-Latin code points).
-            if is_digital and self._corruption_ratio(page) >= _CORRUPT_LATIN1_THRESHOLD:
+            # encoding is corrupted.  Two distinct corruption types are detected:
+            #   1. Latin-1 Supplement chars (U+0080–00FF) map Arabic glyphs to
+            #      extended-Latin code points.
+            #   2. Arabic Extended chars (U+063C–003F) appear as letter substitutes
+            #      due to an internal Arabic block remapping in the font's CMap.
+            if is_digital and self._is_corrupted(page):
                 logger.warning(
                     "Page %d of '%s' has corrupted font encoding — routing to OCR.",
                     page_num, pdf_path.name,
@@ -224,20 +231,25 @@ class PDFIngestor:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _corruption_ratio(page: fitz.Page) -> float:
+    def _is_corrupted(page: fitz.Page) -> bool:
         """
-        Return the fraction of Latin-1 Supplement (U+0080–00FF) characters
-        among all visible characters on the page.
+        Return True when the page's font encoding is corrupted and reliable
+        text extraction is impossible.
 
-        A value ≥ _CORRUPT_LATIN1_THRESHOLD (5 %) indicates a PDF whose font
-        maps Arabic glyphs to extended-Latin code points rather than to their
-        proper Unicode positions.  Such pages cannot be reliably extracted as
-        text and should be routed to OCR instead.
+        Two corruption types are detected:
 
-        Clean Arabic PDFs consistently show 0 % Latin-1 characters.  Medical
-        or technical PDFs that legitimately contain Latin abbreviations (e.g.
-        "BRAF", "LCH") still only introduce ASCII (U+0021–007E), never Latin-1
-        Supplement, so the threshold remains unaffected.
+        Type 1 — Latin-1 remapping (Samples 4 & 5):
+            A custom CMap maps Arabic glyphs to Latin-1 Supplement code points
+            (U+0080–00FF).  Detected when ≥ 5 % of visible chars fall in that
+            range.  Clean Arabic PDFs score 0 %; medical/technical PDFs that
+            legitimately use ASCII abbreviations still score 0 % because ASCII
+            stays in U+0021–007E.
+
+        Type 2 — Internal Arabic block remapping (Sample 6):
+            A custom CMap maps some Arabic letters to rare Extended Arabic code
+            points (U+063C–063F: ؼ ؽ ؾ ؿ) that virtually never occur in
+            standard Modern Arabic text.  Even a single occurrence is conclusive
+            because these characters have no role in MSA.
         """
         raw = page.get_text(
             "rawdict",
@@ -258,7 +270,10 @@ class PDFIngestor:
                         n_total += 1
                         if 0x0080 <= cp <= 0x00FF:
                             n_latin1 += 1
-        return n_latin1 / n_total if n_total > 0 else 0.0
+                        elif cp in _CORRUPT_ARABIC_EXT:
+                            return True   # Type 2: one occurrence is enough
+        # Type 1: threshold-based
+        return (n_latin1 / n_total) >= _CORRUPT_LATIN1_THRESHOLD if n_total > 0 else False
 
     # ------------------------------------------------------------------ #
     #  RTL text extraction                                                 #

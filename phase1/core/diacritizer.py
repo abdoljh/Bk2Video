@@ -1,9 +1,12 @@
 """
-Phase 1 — FarasaDiacritizer
+Phase 1 — ArabicDiacritizer
 Adds Harakat (diacritical marks) to normalised Arabic text before TTS.
 
-Primary  : Farasa Diacritizer REST API (QCRI) — best MSA accuracy.
-Fallback : Mishkal (local Python library) — fully offline, slightly lower accuracy.
+Primary  : farasapy — local Python wrapper for the Farasa toolkit.
+           Runs fully offline after a one-time ~241 MB model download.
+           Install: pip install farasapy
+Fallback : Mishkal — fully offline, slightly lower accuracy.
+           Install: pip install mishkal
 
 Why diacritization matters here
 ────────────────────────────────
@@ -16,41 +19,25 @@ highest-ROI quality improvement in the audio pipeline.
 from __future__ import annotations
 
 import logging
-import os
-import time
-from typing import Literal
+import warnings
 
 logger = logging.getLogger(__name__)
 
-Backend = Literal["farasa", "mishkal", "auto"]
-
-# Farasa public REST endpoint (no API key required for non-commercial use)
-_FARASA_URL = "https://farasa.qcri.org/webapi/diacritize/"
+# Silence noisy third-party warnings emitted during model loading
+logging.getLogger("farasa").setLevel(logging.ERROR)
 
 
-class FarasaDiacritizer:
+class ArabicDiacritizer:
     """
     Adds Harakat to Arabic text.
 
     Args:
-        backend: "farasa" | "mishkal" | "auto"
-                 "auto" tries Farasa first; falls back to Mishkal on failure.
-        farasa_api_key: Optional — if QCRI provides a key for your account.
-        chunk_size: Max characters per API call (Farasa has a payload limit).
-        retry_delay: Seconds to wait between retries on transient errors.
+        chunk_size: Max characters per diacritization call.
     """
 
-    def __init__(
-        self,
-        backend: Backend = "auto",
-        farasa_api_key: str | None = None,
-        chunk_size: int = 1500,
-        retry_delay: float = 1.5,
-    ):
-        self.backend        = backend
-        self.api_key        = farasa_api_key or os.getenv("FARASA_API_KEY", "")
-        self.chunk_size     = chunk_size
-        self.retry_delay    = retry_delay
+    def __init__(self, chunk_size: int = 1500):
+        self.chunk_size = chunk_size
+        self._farasa: object | None = None   # lazy-initialised
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -60,19 +47,11 @@ class FarasaDiacritizer:
         """Return diacritized version of `text`."""
         if not text.strip():
             return text
-
-        if self.backend == "farasa":
+        try:
             return self._diacritize_farasa(text)
-        elif self.backend == "mishkal":
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Farasa diacritization failed (%s) — falling back to Mishkal.", exc)
             return self._diacritize_mishkal(text)
-        else:  # auto
-            try:
-                result = self._diacritize_farasa(text)
-                logger.info("Diacritization: Farasa succeeded.")
-                return result
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Farasa failed (%s) — falling back to Mishkal.", exc)
-                return self._diacritize_mishkal(text)
 
     def diacritize_pages(self, pages) -> list:
         """In-place diacritization of a list of RawPage objects."""
@@ -83,41 +62,32 @@ class FarasaDiacritizer:
         return pages
 
     # ------------------------------------------------------------------ #
-    #  Farasa backend                                                      #
+    #  farasapy backend (primary)                                          #
     # ------------------------------------------------------------------ #
 
-    def _diacritize_farasa(self, text: str) -> str:
-        import requests  # noqa: PLC0415
+    def _get_farasa(self):
+        """Lazy-initialise the FarasaDiacritizer (downloads model once)."""
+        if self._farasa is None:
+            try:
+                import urllib3  # noqa: PLC0415
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except Exception:  # noqa: BLE001
+                pass
+            from farasa.diacratizer import FarasaDiacritizer  # noqa: PLC0415
+            self._farasa = FarasaDiacritizer()
+            logger.info("Farasa diacritizer initialised.")
+        return self._farasa
 
+    def _diacritize_farasa(self, text: str) -> str:
+        diacritizer = self._get_farasa()
         chunks  = self._split_chunks(text)
         results = []
-
-        for i, chunk in enumerate(chunks):
-            payload = {"text": chunk}
-            if self.api_key:
-                payload["api_key"] = self.api_key
-
-            for attempt in range(3):
-                try:
-                    resp = requests.post(
-                        _FARASA_URL,
-                        data=payload,
-                        timeout=30,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    # Farasa returns {"text": "...", ...}
-                    results.append(data.get("text", chunk))
-                    break
-                except Exception as exc:  # noqa: BLE001
-                    if attempt == 2:
-                        raise
-                    logger.warning("Farasa attempt %d failed: %s — retrying…", attempt + 1, exc)
-                    time.sleep(self.retry_delay)
-
-            if i < len(chunks) - 1:
-                time.sleep(0.2)   # be polite to the public API
-
+        for chunk in chunks:
+            result = diacritizer.diacritize(chunk)
+            # farasapy returns a list when given a string; join if needed
+            if isinstance(result, list):
+                result = " ".join(result)
+            results.append(result)
         return " ".join(results)
 
     # ------------------------------------------------------------------ #
@@ -129,7 +99,9 @@ class FarasaDiacritizer:
             from mishkal.tashkeel import TashkeelClass  # noqa: PLC0415
         except ImportError as exc:
             raise ImportError(
-                "Mishkal not installed. Run: pip install mishkal"
+                "Neither farasapy nor Mishkal is available.\n"
+                "  farasapy : pip install farasapy\n"
+                "  Mishkal  : pip install mishkal"
             ) from exc
 
         tashkeel = TashkeelClass()
@@ -155,3 +127,7 @@ class FarasaDiacritizer:
         if current.strip():
             chunks.append(current.strip())
         return chunks or [text]
+
+
+# Back-compat alias used in pipeline.py
+FarasaDiacritizer = ArabicDiacritizer
