@@ -28,8 +28,6 @@ class Phase1Config:
     ocr_backend:    str    = "easyocr"
     ocr_dpi:        int    = 200
     diacritize:     bool   = True
-    diac_backend:   str    = "auto"
-    farasa_api_key: str    = ""
     max_tokens:     int    = 1500
     overlap_tokens: int    = 200
     output_dir:     str    = "output"
@@ -97,8 +95,7 @@ class Phase1Pipeline:
         if self.cfg.diacritize:
             self._progress("Diacritizing (adding Harakat) …", 0.58)
             diacritizer = FarasaDiacritizer(
-                backend        = self.cfg.diac_backend,
-                farasa_api_key = self.cfg.farasa_api_key,
+                chunk_size = self.cfg.max_tokens,
             )
             try:
                 ingestion.pages = diacritizer.diacritize_pages(ingestion.pages)
