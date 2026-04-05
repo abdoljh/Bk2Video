@@ -20,5 +20,8 @@ numpy>=1.24.0
 # HTTP (Farasa API)
 requests>=2.31.0
 
+# farasapy: Python wrapper for the well Farasa toolkit
+farasapy>=0.1.1
+
 # Mishkal offline diacritizer (optional — uncomment to enable)
 # mishkal
