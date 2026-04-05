@@ -54,10 +54,15 @@ logger = logging.getLogger(__name__)
 
 PDFType = Literal["digital", "scanned", "mixed"]
 
-_DIGITAL_CHARS_THRESHOLD = 100
-_LINE_TOL_PT  = 4.0    # y-tolerance for grouping spans onto same line
-_WORD_GAP_PT  = 3.0    # minimum gap (pts) between spans to insert a space
-_DIAC_SPAN_EPSILON = 5.0  # pt: demote single-char diacritic spans in RTL span sort
+_DIGITAL_CHARS_THRESHOLD   = 100
+_LINE_TOL_PT               = 4.0   # y-tolerance for grouping spans onto same line
+_WORD_GAP_PT               = 3.0   # minimum gap (pts) between spans to insert a space
+_DIAC_SPAN_EPSILON         = 5.0   # pt: demote single-char diacritic spans in RTL span sort
+_CORRUPT_LATIN1_THRESHOLD  = 0.05  # Latin-1 (U+0080–00FF) fraction above which a
+                                   # "digital" page is rerouted to OCR.  These chars
+                                   # signal a PDF font with a custom glyph encoding
+                                   # that maps Arabic glyphs to extended-Latin code
+                                   # points — yielding garbage from any text extractor.
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?![\u064B-\u065F\u0670])(?!.*[.،؛؟!]).{4,55}$')
 # Arabic diacritics (combining marks) codepoint set – used in multiple places
@@ -165,7 +170,19 @@ class PDFIngestor:
         for i, page in enumerate(doc):
             page_num   = i + 1
             probe_text = page.get_text("text").strip()
-            if len(probe_text) >= _DIGITAL_CHARS_THRESHOLD:
+            is_digital = len(probe_text) >= _DIGITAL_CHARS_THRESHOLD
+
+            # Even if the page has plenty of text, route to OCR when the font
+            # encoding is corrupted (Latin-1 chars in an Arabic document signal
+            # a custom CMap that maps Arabic glyphs to extended-Latin code points).
+            if is_digital and self._corruption_ratio(page) >= _CORRUPT_LATIN1_THRESHOLD:
+                logger.warning(
+                    "Page %d of '%s' has corrupted font encoding — routing to OCR.",
+                    page_num, pdf_path.name,
+                )
+                is_digital = False
+
+            if is_digital:
                 text = self._extract_rtl_text(page)
                 pages.append(RawPage(
                     page_number  = page_num,
@@ -203,6 +220,47 @@ class PDFIngestor:
         )
 
     # ------------------------------------------------------------------ #
+    #  Corruption detection                                                #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _corruption_ratio(page: fitz.Page) -> float:
+        """
+        Return the fraction of Latin-1 Supplement (U+0080–00FF) characters
+        among all visible characters on the page.
+
+        A value ≥ _CORRUPT_LATIN1_THRESHOLD (5 %) indicates a PDF whose font
+        maps Arabic glyphs to extended-Latin code points rather than to their
+        proper Unicode positions.  Such pages cannot be reliably extracted as
+        text and should be routed to OCR instead.
+
+        Clean Arabic PDFs consistently show 0 % Latin-1 characters.  Medical
+        or technical PDFs that legitimately contain Latin abbreviations (e.g.
+        "BRAF", "LCH") still only introduce ASCII (U+0021–007E), never Latin-1
+        Supplement, so the threshold remains unaffected.
+        """
+        raw = page.get_text(
+            "rawdict",
+            flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP,
+        )
+        n_total = n_latin1 = 0
+        for block in raw.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    for ch in span.get("chars", []):
+                        cp = ch.get("c", 0)
+                        if isinstance(cp, str):
+                            cp = ord(cp) if cp else 0
+                        if cp <= 0x20:
+                            continue
+                        n_total += 1
+                        if 0x0080 <= cp <= 0x00FF:
+                            n_latin1 += 1
+        return n_latin1 / n_total if n_total > 0 else 0.0
+
+    # ------------------------------------------------------------------ #
     #  RTL text extraction                                                 #
     # ------------------------------------------------------------------ #
 
@@ -235,12 +293,14 @@ class PDFIngestor:
                     for ch in char_data:
                         c = ch.get("c", 0)
                         if isinstance(c, int):
-                            if c <= 0x20:
+                            if c < 0x20:   # skip control chars; keep space (0x20) as word boundary
                                 continue
                             ch_str = chr(c)
                         else:
                             ch_str = str(c)
-                            if not ch_str.strip():
+                            if not ch_str:
+                                continue
+                            if len(ch_str) == 1 and ord(ch_str) < 0x20:
                                 continue
 
                         ox, oy = ch["origin"]
@@ -262,7 +322,17 @@ class PDFIngestor:
                     # This avoids the fundamental conflict that arises with a fixed
                     # epsilon — e.g. خصوصًا needs epsilon > 5.9 pt while واحدًا
                     # needs epsilon < 5.0 pt for the same kind of diacritic.
-                    has_arabic = any('\u0600' <= c <= '\u06FF' for c in span_chars)
+                    # Arabic standard block + both Presentation Form blocks
+                    # (FB50–FDFF = Arabic Presentation Forms-A,
+                    #  FE70–FEFF = Arabic Presentation Forms-B).
+                    # NFKC normalisation later decomposes all presentation
+                    # forms to their base Arabic equivalents.
+                    has_arabic = any(
+                        '\u0600' <= c <= '\u06FF'
+                        or '\uFB50' <= c <= '\uFDFF'
+                        or '\uFE70' <= c <= '\uFEFF'
+                        for c in span_chars
+                    )
                     if has_arabic and len(span_chars) > 1:
                         base_idx = [k for k in range(len(span_chars))
                                     if ord(span_chars[k]) not in _DIACRITIC_CP]
