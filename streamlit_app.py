@@ -17,10 +17,6 @@ from pathlib import Path
 
 import streamlit as st
 
-# ── Secrets: read Farasa key from st.secrets (Community Cloud) or env var ──
-import os
-_farasa_key_default = st.secrets.get("FARASA_API_KEY", "") or os.getenv("FARASA_API_KEY", "")
-
 # ── Phase 1 package is at ./phase1 relative to repo root ──────────────── #
 sys.path.insert(0, str(Path(__file__).parent))
 from phase1 import Phase1Pipeline, Phase1Config  # noqa: E402
@@ -148,16 +144,6 @@ with st.sidebar:
 
     st.markdown("#### Diacritization")
     diacritize   = st.toggle("Enable Diacritization (Harakat)", value=True)
-    diac_backend = st.selectbox("Backend", ["auto", "farasa", "mishkal"],
-                                 disabled=not diacritize)
-    # Pre-fill from st.secrets; user can override in the sidebar
-    farasa_key = st.text_input(
-        "Farasa API Key",
-        value=_farasa_key_default,
-        type="password",
-        disabled=not diacritize,
-        help="Set via st.secrets['FARASA_API_KEY'] in Community Cloud Advanced Settings.",
-    )
 
     st.markdown("#### Chunking")
     max_tokens     = st.slider("Max Tokens / Chunk", 500, 3000, 1500, step=100)
@@ -211,8 +197,7 @@ if uploaded:
 
             cfg = Phase1Config(
                 ocr_gpu=ocr_gpu, ocr_backend=ocr_backend, ocr_dpi=ocr_dpi,
-                diacritize=diacritize, diac_backend=diac_backend,
-                farasa_api_key=farasa_key,
+                diacritize=diacritize,
                 max_tokens=max_tokens, overlap_tokens=overlap_tokens,
                 output_dir=str(output_dir),
             )
