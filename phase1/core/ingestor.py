@@ -380,7 +380,14 @@ class PDFIngestor:
 
                         raw_chars = "".join(span_chars[k] for k in order)
                     else:
-                        raw_chars = "".join(span_chars)
+                        # Non-Arabic spans (punctuation, spaces, digits): sort by
+                        # x-DESC to respect RTL embedding order.  Without this, a
+                        # span like [space(x=170), period(x=174)] stays as " ." and
+                        # the period ends up BEFORE the next Arabic word instead of
+                        # after the preceding one.
+                        order = sorted(range(len(span_chars)),
+                                       key=lambda k: -x_origins[k])
+                        raw_chars = "".join(span_chars[k] for k in order)
 
                     span_text = unicodedata.normalize("NFKC", raw_chars)
                     if not span_text.strip():
@@ -433,6 +440,10 @@ class PDFIngestor:
                 return True
             return False
 
+        # Punctuation chars that must not have a space inserted BEFORE them
+        # (i.e. they attach directly to the preceding word in Arabic).
+        _ATTACH_BEFORE = re.compile(r'^[.،؛؟!:\u0640]+')
+
         def fix_comma(line: str) -> str:
             # In RTL text, ، follows the word to its RIGHT in visual space
             # (the word that PRECEDES it in reading order).
@@ -448,6 +459,7 @@ class PDFIngestor:
             return line
 
         visual_lines: list[str] = []
+        _pending_prefix = ""   # right-fragment carried from previous line's mid-line split
 
         for line_spans in lines:
             # Sort descending by left-x → RTL reading order.
@@ -506,15 +518,37 @@ class PDFIngestor:
                         parts.append(next_text + text)
                         skip_next = True
                         continue
-                    elif gap >= _WORD_GAP_PT:
+                    elif gap >= _WORD_GAP_PT and not _ATTACH_BEFORE.match(next_text):
                         parts.append(text)
                         parts.append(" ")
                         continue
                 parts.append(text)
 
             line_text = clean_punct(fix_comma("".join(parts).strip()))
-            if line_text:
-                visual_lines.append(line_text)
+            if _pending_prefix:
+                line_text = _pending_prefix + " " + line_text if line_text else _pending_prefix
+                _pending_prefix = ""
+            if not line_text:
+                continue
+            # Split on mid-line sentence terminals (period/؟/! followed by a
+            # space and an Arabic letter) so paragraph reconstruction can detect
+            # sentence boundaries that fall inside a single PDF visual line.
+            # The right-fragment of the LAST split is carried as a prefix to the
+            # NEXT visual line — this avoids the fragment being mistaken for a
+            # standalone heading when it is really a sentence opener that
+            # continues on the following line.
+            sub = re.split(r'(?<=[.؟!])\s+(?=[\u0600-\u06FF])', line_text)
+            for part in sub[:-1]:
+                if part.strip():
+                    visual_lines.append(part)
+            last = sub[-1].strip()
+            if len(sub) > 1 and last:
+                _pending_prefix = last   # carry forward; join with next line
+            elif last:
+                visual_lines.append(last)
+
+        if _pending_prefix:              # flush any remaining prefix
+            visual_lines.append(_pending_prefix)
 
         # ── Paragraph reconstruction with heading detection ─────────────
         if not visual_lines:

@@ -152,6 +152,13 @@ class ArabicTextNormalizer:
 
         text = unicodedata.normalize("NFC", text)
 
+        # Normalise U+06BE (Heh Doachashmee ھ) to U+0647 (Arabic Heh ه).
+        # Presentation-form PDFs sometimes store the heh letter as the
+        # Urdu/Pashto variant (U+06BE) or its positional forms (FBAB/FBAD).
+        # NFKC decomposed FBAB/FBAD → U+06BE but doesn't unify with U+0647.
+        # In standard Arabic text U+06BE is a display-artefact — normalise it.
+        text = text.replace('\u06BE', '\u0647')
+
         # Apply article fix word-by-word
         text = " ".join(fix_article(w) for w in text.split(" "))
 
