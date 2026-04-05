@@ -155,6 +155,16 @@ class ArabicTextNormalizer:
         # Apply article fix word-by-word
         text = " ".join(fix_article(w) for w in text.split(" "))
 
+        # Fix word-internal double-alef-before-lam: اال → الا
+        # This artifact arises when a lam-alef ligature's two code points share
+        # the same PDF origin x, so x-DESC sort leaves them adjacent rather than
+        # interleaving the ل between them (e.g. المجاالت → المجالات).
+        # ا+ا+ل is not a valid sequence in any Arabic word, so this is safe.
+        text = " ".join(
+            w.replace('\u0627\u0627\u0644', '\u0627\u0644\u0627')
+            for w in text.split(" ")
+        )
+
         if source == "scanned":
             _load_arabic_libs()
             cfg = _reshaper.ArabicReshaper(configuration={

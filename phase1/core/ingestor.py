@@ -57,7 +57,6 @@ PDFType = Literal["digital", "scanned", "mixed"]
 _DIGITAL_CHARS_THRESHOLD = 100
 _LINE_TOL_PT  = 4.0    # y-tolerance for grouping spans onto same line
 _WORD_GAP_PT  = 3.0    # minimum gap (pts) between spans to insert a space
-_DIAC_EPSILON = 3.0    # pt: demote diacritics in x-sort so they follow base letters
 _DIAC_SPAN_EPSILON = 5.0  # pt: demote single-char diacritic spans in RTL span sort
 _SENT_TERMINAL = re.compile(r'[.؟!]\s*$')
 _IS_HEADING    = re.compile(r'^(?![\u064B-\u065F\u0670])(?!.*[.،؛؟!]).{4,55}$')
@@ -255,22 +254,45 @@ class PDFIngestor:
                     if not span_chars:
                         continue
 
-                    # Sort chars by x DESC so both visual-order and logical-order
-                    # spans yield correct logical Unicode order.  Diacritics are
-                    # demoted by _DIAC_EPSILON pt so they always land AFTER their
-                    # base letter (which shares the same x position) rather than
-                    # before it, matching Unicode combining-mark convention.
+                    # Sort chars by x DESC to recover logical Unicode order.
+                    #
+                    # For spans containing diacritics we use a nearest-host
+                    # assignment: each diacritic is placed immediately after the
+                    # base letter whose x-origin is closest (min absolute distance).
+                    # This avoids the fundamental conflict that arises with a fixed
+                    # epsilon — e.g. خصوصًا needs epsilon > 5.9 pt while واحدًا
+                    # needs epsilon < 5.0 pt for the same kind of diacritic.
                     has_arabic = any('\u0600' <= c <= '\u06FF' for c in span_chars)
                     if has_arabic and len(span_chars) > 1:
-                        order = sorted(
-                            range(len(span_chars)),
-                            key=lambda k: (
-                                -round(x_origins[k]
-                                       - _DIAC_EPSILON * (ord(span_chars[k]) in _DIACRITIC_CP),
-                                       1),   # 0.1 pt rounding collapses sub-pixel noise
-                                k,           # lower original index first for equal keys
-                            ),
-                        )
+                        base_idx = [k for k in range(len(span_chars))
+                                    if ord(span_chars[k]) not in _DIACRITIC_CP]
+                        diac_idx = [k for k in range(len(span_chars))
+                                    if ord(span_chars[k]) in _DIACRITIC_CP]
+
+                        if not base_idx or not diac_idx:
+                            # All base or all diacritics: simple x-DESC sort
+                            order = sorted(
+                                range(len(span_chars)),
+                                key=lambda k: (-round(x_origins[k], 1), k),
+                            )
+                        else:
+                            # Assign each diacritic to its nearest base letter.
+                            # Diacritic sort key: (same rounded-x bucket as host,
+                            # secondary=1 so it follows host's secondary=0).
+                            diac_set = set(diac_idx)
+                            host_rx: dict[int, float] = {}
+                            for d in diac_idx:
+                                nb = min(base_idx,
+                                         key=lambda b: abs(x_origins[b] - x_origins[d]))
+                                host_rx[d] = round(x_origins[nb], 1)
+
+                            def _char_sort_key(k: int) -> tuple:
+                                if k in diac_set:
+                                    return (-host_rx[k], 1, k)
+                                return (-round(x_origins[k], 1), 0, k)
+
+                            order = sorted(range(len(span_chars)), key=_char_sort_key)
+
                         raw_chars = "".join(span_chars[k] for k in order)
                     else:
                         raw_chars = "".join(span_chars)
