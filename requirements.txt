@@ -17,11 +17,9 @@ Pillow>=10.0.0
 numpy>=1.24.0
 # pytesseract>=0.3.10   # uncomment if switching OCR backend to Tesseract
 
-# HTTP (Farasa API)
-requests>=2.31.0
-
-# farasapy: Python wrapper for the well Farasa toolkit
+# Diacritization
+# farasapy: local toolkit wrapper — requires Java at runtime; works on
+#   machines with Java installed (local dev). Falls back to mishkal on
+#   Streamlit Cloud (no Java).
 farasapy>=0.1.1
-
-# Mishkal offline diacritizer (optional — uncomment to enable)
-# mishkal
+mishkal
