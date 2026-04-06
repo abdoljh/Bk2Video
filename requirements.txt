@@ -12,10 +12,21 @@ arabic-reshaper>=3.0.0
 python-bidi>=0.6.0
 
 # OCR — scanned PDFs
+# Three backends are supported; install whichever you need:
+#
+#   PaddleOCR (recommended for Arabic — highest accuracy):
+#     pip install paddlepaddle paddleocr
+#     GPU: pip install paddlepaddle-gpu paddleocr
+#
+#   EasyOCR (good accuracy, easier install):
 easyocr>=1.7.1
+#
+#   Tesseract (lightweight, needs system tesseract-ocr + language pack):
+# pytesseract>=0.3.10
+#
+# Shared image utilities used by all backends:
 Pillow>=10.0.0
 numpy>=1.24.0
-# pytesseract>=0.3.10   # uncomment if switching OCR backend to Tesseract
 
 # Diacritization
 # farasapy: local toolkit wrapper — requires Java at runtime; works on

@@ -138,7 +138,17 @@ with st.sidebar:
     st.markdown("### ⚙️ Configuration")
 
     st.markdown("#### OCR")
-    ocr_backend = st.selectbox("OCR Backend", ["easyocr", "tesseract"], index=0)
+    ocr_backend = st.selectbox(
+        "OCR Backend",
+        ["paddleocr", "easyocr", "tesseract"],
+        index=0,
+        help=(
+            "**PaddleOCR** — best Arabic accuracy; dedicated Arabic PP-OCRv3 model "
+            "(install: `pip install paddlepaddle paddleocr`).\n\n"
+            "**EasyOCR** — good accuracy, easier install.\n\n"
+            "**Tesseract** — lightweight fallback."
+        ),
+    )
     ocr_gpu     = st.toggle("Use GPU for OCR", value=False)
     ocr_dpi     = st.slider("Scan DPI", 150, 400, 200, step=50)
 

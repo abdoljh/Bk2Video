@@ -70,7 +70,12 @@ class Phase1Pipeline:
         self._progress("Running OCR on scanned pages …", 0.18)
         has_scanned = any(p.pdf_type == "scanned" for p in ingestion.pages)
         if has_scanned:
-            backend = OCRBackend.EASYOCR if self.cfg.ocr_backend == "easyocr" else OCRBackend.TESSERACT
+            _backend_map = {
+                "easyocr":   OCRBackend.EASYOCR,
+                "paddleocr": OCRBackend.PADDLEOCR,
+                "tesseract": OCRBackend.TESSERACT,
+            }
+            backend = _backend_map.get(self.cfg.ocr_backend, OCRBackend.EASYOCR)
             ocr = OCREngine(backend=backend, gpu=self.cfg.ocr_gpu)
             try:
                 ingestion.pages = ocr.process_pages(ingestion.pages)
