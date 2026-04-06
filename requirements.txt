@@ -12,16 +12,12 @@ arabic-reshaper>=3.0.0
 python-bidi>=0.6.0
 
 # OCR — scanned PDFs
-# Three backends are supported; install whichever you need:
-#
-#   PaddleOCR (recommended for Arabic — highest accuracy):
-#     pip install paddlepaddle paddleocr
-#     GPU: pip install paddlepaddle-gpu paddleocr
-#
-#   EasyOCR (good accuracy, easier install):
+# PaddleOCR: best Arabic accuracy (dedicated PP-OCRv3-ar model)
+paddlepaddle>=2.6.0
+paddleocr>=2.7.0
+# EasyOCR: good fallback, easier install
 easyocr>=1.7.1
-#
-#   Tesseract (lightweight, needs system tesseract-ocr + language pack):
+# Tesseract (lightweight, needs system tesseract-ocr + arabic language pack):
 # pytesseract>=0.3.10
 #
 # Shared image utilities used by all backends:
