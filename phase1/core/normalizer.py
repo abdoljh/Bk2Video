@@ -48,22 +48,6 @@ _ALEF_MA  = '\u0622'   # آ
 _LAM      = '\u0644'   # ل
 _ALL_ALEF = {_ALEF, _ALEF_HA, _ALEF_HB, _ALEF_MA}
 
-_reshaper    = None
-_get_display = None
-
-
-def _load_arabic_libs() -> None:
-    global _reshaper, _get_display
-    if _reshaper is not None:
-        return
-    try:
-        import arabic_reshaper
-        from bidi.algorithm import get_display
-        _reshaper    = arabic_reshaper
-        _get_display = get_display
-    except ImportError as exc:
-        raise ImportError("Run: pip install arabic-reshaper python-bidi") from exc
-
 
 def fix_article(word: str) -> str:
     """
@@ -172,16 +156,12 @@ class ArabicTextNormalizer:
             for w in text.split(" ")
         )
 
-        if source == "scanned":
-            _load_arabic_libs()
-            cfg = _reshaper.ArabicReshaper(configuration={
-                "delete_harakat":    False,
-                "support_ligatures": True,
-            })
-            text = "\n".join(cfg.reshape(line) for line in text.splitlines())
-            text = "\n".join(
-                _get_display(line, base_dir="R") for line in text.splitlines()
-            )
+        # NOTE: reshape + bidi (arabic-reshaper / python-bidi) are NOT applied
+        # to scanned text.  OCR engines (Tesseract, EasyOCR, PaddleOCR) already
+        # output clean logical-order Unicode (U+0600–U+06FF).  Applying reshape
+        # + get_display() would convert that to visual Presentation Forms
+        # (U+FE70–FEFF), which is correct for image/PDF rendering but wrong for
+        # text files and downstream NLP/LLM processing.
 
         return self._clean(text).strip()
 
