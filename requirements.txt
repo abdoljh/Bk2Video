@@ -12,12 +12,14 @@ arabic-reshaper>=3.0.0
 python-bidi>=0.6.0
 
 # OCR — scanned PDFs
-# PaddleOCR: best Arabic accuracy, but has NO Python 3.14 wheels —
-#   install locally only: pip install paddlepaddle paddleocr
+# Tesseract: lightweight, fits Streamlit Cloud 1 GB RAM limit.
+#   System packages in packages.txt: tesseract-ocr + tesseract-ocr-ara
+pytesseract>=0.3.10
+# EasyOCR: good accuracy but needs ~1 GB RAM (PyTorch) — local use only:
+# easyocr>=1.7.1
+# PaddleOCR: best Arabic accuracy but no Python 3.14 wheels — local only:
 # paddlepaddle>=2.6.0
 # paddleocr>=2.7.0
-# EasyOCR: default for Streamlit Cloud (Python 3.14 compatible):
-easyocr>=1.7.1
 # Tesseract (lightweight, needs system tesseract-ocr + arabic language pack):
 # pytesseract>=0.3.10
 #
