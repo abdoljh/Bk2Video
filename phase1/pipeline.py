@@ -31,6 +31,10 @@ class Phase1Config:
     max_tokens:     int    = 1500
     overlap_tokens: int    = 200
     output_dir:     str    = "output"
+    # "auto"    — let the ingestor decide (default)
+    # "digital" — force PyMuPDF extraction for all pages
+    # "ocr"     — force OCR for all pages regardless of content
+    pdf_mode:       str    = "auto"
 
 
 @dataclass
@@ -65,6 +69,19 @@ class Phase1Pipeline:
         ingestor  = PDFIngestor(dpi=self.cfg.ocr_dpi)
         ingestion = ingestor.ingest(pdf_path)
         logger.info("PDF type: %s (%d pages)", ingestion.pdf_type, ingestion.total_pages)
+
+        # ── Mode override ─────────────────────────────────────────────── #
+        if self.cfg.pdf_mode == "ocr":
+            for p in ingestion.pages:
+                p.pdf_type  = "scanned"
+                p.raw_text  = ""       # discard digital extraction; OCR will fill it
+            ingestion.pdf_type = "scanned"
+            logger.info("pdf_mode=ocr — all pages forced to OCR.")
+        elif self.cfg.pdf_mode == "digital":
+            for p in ingestion.pages:
+                p.pdf_type = "digital"
+            ingestion.pdf_type = "digital"
+            logger.info("pdf_mode=digital — all pages forced to digital extraction.")
 
         # ── Step 2: OCR (scanned pages only) ─────────────────────────── #
         self._progress("Running OCR on scanned pages …", 0.18)

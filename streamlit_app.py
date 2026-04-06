@@ -137,6 +137,19 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ Configuration")
 
+    st.markdown("#### PDF Processing Mode")
+    pdf_mode = st.radio(
+        "Mode",
+        ["auto", "digital", "ocr"],
+        index=0,
+        horizontal=True,
+        help=(
+            "**auto** — detect per page (default).\n\n"
+            "**digital** — force PyMuPDF text extraction on all pages.\n\n"
+            "**ocr** — force OCR on all pages (ignores embedded text)."
+        ),
+    )
+
     st.markdown("#### OCR")
     ocr_backend = st.selectbox(
         "OCR Backend",
@@ -208,6 +221,7 @@ if uploaded:
                 )
 
             cfg = Phase1Config(
+                pdf_mode=pdf_mode,
                 ocr_gpu=ocr_gpu, ocr_backend=ocr_backend, ocr_dpi=ocr_dpi,
                 diacritize=diacritize,
                 max_tokens=max_tokens, overlap_tokens=overlap_tokens,
