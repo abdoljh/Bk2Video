@@ -140,12 +140,13 @@ with st.sidebar:
     st.markdown("#### OCR")
     ocr_backend = st.selectbox(
         "OCR Backend",
-        ["paddleocr", "easyocr", "tesseract"],
+        ["easyocr", "paddleocr", "tesseract"],
         index=0,
         help=(
-            "**PaddleOCR** — best Arabic accuracy; dedicated Arabic PP-OCRv3 model "
-            "(install: `pip install paddlepaddle paddleocr`).\n\n"
-            "**EasyOCR** — good accuracy, easier install.\n\n"
+            "**EasyOCR** — good Arabic accuracy; works on Streamlit Cloud.\n\n"
+            "**PaddleOCR** — highest Arabic accuracy (PP-OCRv3-ar model), "
+            "but requires Python ≤ 3.12; install locally: "
+            "`pip install paddlepaddle paddleocr`.\n\n"
             "**Tesseract** — lightweight fallback."
         ),
     )
