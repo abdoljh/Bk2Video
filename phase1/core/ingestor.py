@@ -74,6 +74,44 @@ _DIACRITIC_CP = (
     set(range(0x0610, 0x061B)) | set(range(0x064B, 0x0653)) | {0x0670}
 )
 
+# Arabic letters that never connect to the FOLLOWING letter (non-joining).
+# After one of these, the next joining letter always starts a new cluster.
+_NON_JOINING_ARABIC = frozenset([
+    0x0622, 0x0623, 0x0624, 0x0625, 0x0627, 0x0629,   # آ أ ؤ إ ا ة
+    0x062F, 0x0630, 0x0631, 0x0632, 0x0648, 0x0649,   # د ذ ر ز و ى
+    0x0671, 0x06BE, 0x06C1,                             # ٱ ھ ہ
+])
+
+# Arabic Presentation Forms-B (FE70–FEFF) that are INITIAL forms.
+# An Initial-form letter always starts a new connected cluster (word-initial
+# position).  Detecting [non-joining][non-joining][initial] at span-start
+# positions 0–2 reveals an omitted inter-word space.
+_ARABIC_PF_INITIAL = frozenset([
+    0xFE8B,  # Yeh with Hamza Above — Initial
+    0xFE91,  # Ba — Initial
+    0xFE97,  # Ta — Initial
+    0xFE9B,  # Tha — Initial
+    0xFE9F,  # Jeem — Initial
+    0xFEA3,  # Hah — Initial
+    0xFEA7,  # Khah — Initial
+    0xFEB3,  # Seen — Initial
+    0xFEB7,  # Sheen — Initial
+    0xFEBB,  # Sad — Initial
+    0xFEBF,  # Dad — Initial
+    0xFEC3,  # Tah — Initial
+    0xFEC7,  # Dhah — Initial
+    0xFECB,  # Ain — Initial  ← key case: هو + عملیة
+    0xFECF,  # Ghain — Initial
+    0xFED3,  # Fa — Initial
+    0xFED7,  # Qaf — Initial
+    0xFEDB,  # Kaf — Initial
+    0xFEDF,  # Lam — Initial
+    0xFEE3,  # Meem — Initial
+    0xFEE7,  # Nun — Initial
+    0xFEEB,  # Heh — Initial
+    0xFEF3,  # Yeh — Initial
+])
+
 # Lam-alef obligatory ligature pairs → Unicode Presentation Form placeholders.
 # Kept as module-level reference; the active fix uses per-character x comparison.
 _LAM_ALEF_PF: list[tuple[str, str]] = [
@@ -378,7 +416,24 @@ class PDFIngestor:
 
                             order = sorted(range(len(span_chars)), key=_char_sort_key)
 
-                        raw_chars = "".join(span_chars[k] for k in order)
+                        # ── Intra-span word-break detection ────────────────────
+                        # Some Arabic PDFs omit the word-space glyph between two
+                        # adjacent words.  Detect by checking the first three chars
+                        # (positions 0–2 in x-DESC sorted order): if two consecutive
+                        # non-joining Arabic base letters are immediately followed by
+                        # an Arabic Initial Presentation Form, the PDF likely merged
+                        # a short word (e.g. the pronoun هو) with the next word.
+                        # Restricting the check to span-start positions 0–2 prevents
+                        # false positives for intra-word sequences like وأنواعه.
+                        if (len(order) >= 3
+                                and ord(span_chars[order[0]]) in _NON_JOINING_ARABIC
+                                and ord(span_chars[order[1]]) in _NON_JOINING_ARABIC
+                                and ord(span_chars[order[2]]) in _ARABIC_PF_INITIAL):
+                            raw_chars = ("".join(span_chars[k] for k in order[:2])
+                                         + ' '
+                                         + "".join(span_chars[k] for k in order[2:]))
+                        else:
+                            raw_chars = "".join(span_chars[k] for k in order)
                     else:
                         # Non-Arabic spans (punctuation, spaces, digits): sort by
                         # x-DESC to respect RTL embedding order.  Without this, a
