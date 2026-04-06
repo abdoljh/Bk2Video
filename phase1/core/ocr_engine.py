@@ -1,11 +1,16 @@
 """
 Phase 1 — OCREngine
-Runs EasyOCR (primary) or Tesseract (fallback) on scanned page images.
-Both support Arabic with right-to-left text.
+Three backends: EasyOCR (default), PaddleOCR, and Tesseract (fallback).
+
+PaddleOCR is recommended for Arabic — it ships a dedicated Arabic recognition
+model with better layout analysis and higher accuracy on clean scans.
+EasyOCR is a solid fallback when PaddleOCR is not installed.
+Tesseract is kept for lightweight / headless environments.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 from enum import Enum, auto
 from typing import TYPE_CHECKING
@@ -18,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class OCRBackend(Enum):
     EASYOCR   = auto()
+    PADDLEOCR = auto()
     TESSERACT = auto()
 
 
@@ -25,13 +31,22 @@ class OCREngine:
     """
     Fills in `raw_text` for pages that were flagged as scanned by PDFIngestor.
 
-    EasyOCR is preferred — it handles Arabic script without extra config and
-    has better accuracy on noisy scans. Tesseract is kept as a fallback for
-    environments where EasyOCR's GPU/model download is not feasible.
+    Backend comparison for Arabic PDFs:
+
+    PaddleOCR  — Best accuracy on Arabic. Uses a dedicated Arabic recognition
+                 model (PP-OCRv3-ar). Handles multi-column layouts well.
+                 Requires: paddlepaddle + paddleocr  (~1 GB download on first run).
+
+    EasyOCR    — Good accuracy without extra setup. Handles Arabic RTL natively.
+                 Requires: easyocr (~450 MB download on first run).
+
+    Tesseract  — Lightweight, no model download needed if system Tesseract is
+                 installed. Lower Arabic accuracy on complex layouts.
+                 Requires: pytesseract + system tesseract-ocr with arabic language pack.
 
     Usage::
 
-        engine = OCREngine(backend=OCRBackend.EASYOCR)
+        engine = OCREngine(backend=OCRBackend.PADDLEOCR)
         pages  = engine.process_pages(ingestion_result.pages)
     """
 
@@ -59,8 +74,13 @@ class OCREngine:
             return pages
 
         logger.info("Running OCR on %d scanned page(s) via %s …", len(scanned), self.backend.name)
-        ocr_fn = self._easyocr_page if self.backend == OCRBackend.EASYOCR else self._tesseract_page
         self._lazy_init()
+
+        ocr_fn = {
+            OCRBackend.EASYOCR:   self._easyocr_page,
+            OCRBackend.PADDLEOCR: self._paddleocr_page,
+            OCRBackend.TESSERACT: self._tesseract_page,
+        }[self.backend]
 
         for page in scanned:
             if page.image_bytes:
@@ -70,12 +90,13 @@ class OCREngine:
         return pages
 
     # ------------------------------------------------------------------ #
-    #  Backends                                                            #
+    #  Lazy initialisation                                                 #
     # ------------------------------------------------------------------ #
 
     def _lazy_init(self):
         if self._reader is not None:
             return
+
         if self.backend == OCRBackend.EASYOCR:
             try:
                 import easyocr  # noqa: PLC0415
@@ -86,7 +107,28 @@ class OCREngine:
                 raise ImportError(
                     "EasyOCR not installed. Run: pip install easyocr"
                 ) from exc
-        else:
+
+        elif self.backend == OCRBackend.PADDLEOCR:
+            try:
+                from paddleocr import PaddleOCR  # noqa: PLC0415
+                # lang='ar'  → Arabic PP-OCRv3 recognition model
+                # use_angle_cls=True  → auto-correct rotated text blocks
+                # show_log=False  → suppress PaddlePaddle's verbose output
+                self._reader = PaddleOCR(
+                    use_angle_cls=True,
+                    lang="ar",
+                    use_gpu=self.gpu,
+                    show_log=False,
+                )
+                logger.info("PaddleOCR reader initialised (gpu=%s).", self.gpu)
+            except ImportError as exc:
+                raise ImportError(
+                    "PaddleOCR not installed. Run:\n"
+                    "  pip install paddlepaddle paddleocr\n"
+                    "For GPU: pip install paddlepaddle-gpu paddleocr"
+                ) from exc
+
+        else:  # TESSERACT
             try:
                 import pytesseract  # noqa: PLC0415 (just verify it's available)
                 self._reader = pytesseract
@@ -96,18 +138,56 @@ class OCREngine:
                     "pytesseract not installed. Run: pip install pytesseract"
                 ) from exc
 
+    # ------------------------------------------------------------------ #
+    #  Backend implementations                                            #
+    # ------------------------------------------------------------------ #
+
     def _easyocr_page(self, image_bytes: bytes) -> str:
         import numpy as np  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
 
-        img = Image.open(__import__("io").BytesIO(image_bytes)).convert("RGB")
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         arr = np.array(img)
         results = self._reader.readtext(arr, detail=0, paragraph=True)
         return "\n".join(results)
 
+    def _paddleocr_page(self, image_bytes: bytes) -> str:
+        """
+        Run PaddleOCR on a single page image.
+
+        PaddleOCR result structure (per page):
+            result[0]  — list of detected text blocks, each:
+                [[tl, tr, br, bl],   ← quadrilateral bounding box (4 × [x, y])
+                 [text, confidence]]
+
+        Blocks are returned in approximate top-to-bottom, right-to-left order
+        for Arabic text (PaddleOCR sorts by the top-left y of each box).
+        We extract only the text strings, filter low-confidence hits, and join
+        with newlines so downstream normalisation sees a clean line-per-block
+        structure.
+        """
+        import numpy as np  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        arr = np.array(img)
+        result = self._reader.ocr(arr, cls=True)
+
+        if not result or result[0] is None:
+            return ""
+
+        lines: list[str] = []
+        for block in result[0]:
+            # block = [bbox, [text, confidence]]
+            text, conf = block[1]
+            if conf >= 0.3 and text.strip():   # discard very low-confidence noise
+                lines.append(text.strip())
+
+        return "\n".join(lines)
+
     def _tesseract_page(self, image_bytes: bytes) -> str:
         from PIL import Image  # noqa: PLC0415
 
-        img = Image.open(__import__("io").BytesIO(image_bytes))
+        img = Image.open(io.BytesIO(image_bytes))
         # osd+ara: auto-detect orientation + Arabic language
         return self._reader.image_to_string(img, lang="ara", config="--psm 3")
