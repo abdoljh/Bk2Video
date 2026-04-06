@@ -1,0 +1,118 @@
+
+[     UTC     ] Logs for bk2video.streamlit.app/
+────────────────────────────────────────────────────────────────────────────────────────
+[12:47:18] 🖥 Provisioning machine...
+[12:47:18] 🎛 Preparing system...
+[12:47:18] ⛓ Spinning up manager process...
+[12:47:13] 🚀 Starting up repository: 'bk2video', branch: 'main', main module: 'streamlit_app.py'
+[12:47:13] 🐙 Cloning repository...
+[12:47:15] 🐙 Cloning into '/mount/src/bk2video'...
+
+[12:47:15] 🐙 Cloned repository!
+[12:47:15] 🐙 Pulling code changes from Github...
+[12:47:16] 📦 Processing dependencies...
+
+──────────────────────────────────────── uv ───────────────────────────────────────────
+
+Using uv pip install.
+Using Python 3.14.3 environment at /home/adminuser/venv
+  × No solution found when resolving dependencies:
+  ╰─▶ Because only the following versions of paddlepaddle are available:
+          paddlepaddle<=2.6.2
+          paddlepaddle>=3.0.0
+      and all of:
+          paddlepaddle==2.6.2
+          paddlepaddle>=3.0.0
+      have no wheels with a matching Python ABI tag, we can conclude that
+      paddlepaddle>=2.6.0,<3.0.0 cannot be used.
+      And because you require paddlepaddle>=2.6.0, we can conclude that your
+      requirements are unsatisfiable.
+
+      hint: Pre-releases are available for paddlepaddle in the requested
+      range (e.g., 3.0.0rc1), but pre-releases weren't enabled (try:
+      `--prerelease=allow`)
+Checking if Streamlit is installed
+Installing rich for an improved exception logging
+Using uv pip install.
+Using Python 3.14.3 environment at /home/adminuser/venv
+Resolved 4 packages in 129ms
+Prepared 4 packages in 149ms
+Installed 4 packages in 15ms
+ [2026-04-06 12:47:17.596345] + markdown-it-py==4.0.0
+ + mdurl==0.1.2
+ + pygments==2.20.0
+ + rich==14.3.3
+
+────────────────────────────────────────────────────────────────────────────────────────
+
+
+──────────────────────────────────────── pip ───────────────────────────────────────────
+
+Using standard pip install.
+Collecting streamlit>=1.35.0 (from -r /mount/src/bk2video/requirements.txt (line 5))
+  Downloading streamlit-1.56.0-py3-none-any.whl.metadata (9.8 kB)
+Collecting PyMuPDF>=1.24.0 (from -r /mount/src/bk2video/requirements.txt (line 8))
+  Downloading pymupdf-1.27.2.2-cp310-abi3-manylinux_2_28_x86_64.whl.metadata (3.4 kB)
+Collecting arabic-reshaper>=3.0.0 (from -r /mount/src/bk2video/requirements.txt (line 11))
+  Downloading arabic_reshaper-3.0.0-py3-none-any.whl.metadata (12 kB)
+Collecting python-bidi>=0.6.0 (from -r /mount/src/bk2video/requirements.txt (line 12))
+  Downloading python_bidi-0.6.7.tar.gz (45 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.5/45.5 kB 5.9 MB/s eta 0:00:00[2026-04-06 12:47:19.415034] 
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Installing backend dependencies: started
+  Installing backend dependencies: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+ERROR: Ignored the following versions that require a different python version: 0.55.2 Requires-Python <3.5
+ERROR: Could not find a version that satisfies the requirement paddlepaddle>=2.6.0 (from versions: none)
+ERROR: No matching distribution found for paddlepaddle>=2.6.0
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+Checking if Streamlit is installed
+Installing rich for an improved exception logging
+Using standard pip install.
+Collecting rich>=10.14.0
+  Downloading rich-14.3.3-py3-none-any.whl.metadata (18 kB)
+Collecting markdown-it-py>=2.2.0 (from rich>=10.14.0)
+  Downloading markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+Collecting pygments<3.0.0,>=2.13.0 (from rich>=10.14.0)
+  Downloading pygments-2.20.0-py3-none-any.whl.metadata (2.5 kB)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=10.14.0)
+  Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Downloading rich-14.3.3-py3-none-any.whl (310 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 310.5/310.5 kB 13.6 MB/s eta 0:00:00[2026-04-06 12:47:37.295156] 
+Downloading markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 87.3/87.3 kB 344.9 MB/s eta 0:00:00[2026-04-06 12:47:37.307353] 
+Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 74.1 MB/s eta 0:00:00[2026-04-06 12:47:37.336399] 
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: pygments, mdurl, markdown-it-py, rich
+  Attempting uninstall: pygments
+    Found existing installation: Pygments 2.20.0
+    Uninstalling Pygments-2.20.0:
+      Successfully uninstalled Pygments-2.20.0
+  Attempting uninstall: mdurl
+    Found existing installation: mdurl 0.1.2
+    Uninstalling mdurl-0.1.2:
+      Successfully uninstalled mdurl-0.1.2
+  Attempting uninstall: markdown-it-py
+    Found existing installation: markdown-it-py 4.0.0
+    Uninstalling markdown-it-py-4.0.0:
+      Successfully uninstalled markdown-it-py-4.0.0
+  Attempting uninstall: rich
+    Found existing installation: rich 14.3.3
+    Uninstalling rich-14.3.3:
+      Successfully uninstalled rich-14.3.3
+Successfully installed markdown-it-py-4.0.0 mdurl-0.1.2 pygments-2.20.0 rich-14.3.3
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+
+────────────────────────────────────────────────────────────────────────────────────────
+
+[12:47:40] ❗️ installer returned a non-zero exit code
+[12:47:40] ❗️ Error during processing dependencies! Please fix the error and push an update, or try restarting the app.
