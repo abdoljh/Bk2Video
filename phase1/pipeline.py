@@ -15,9 +15,9 @@ from typing import Callable
 from .core.ingestor      import PDFIngestor
 from .core.ocr_engine    import OCREngine, OCRBackend
 from .core.normalizer    import ArabicTextNormalizer
-from .core.diacritizer   import FarasaDiacritizer
 from .core.chunker       import SemanticChunker, Chunk
 from .core.output_writer import OutputWriter
+from .core.summarizer    import BookSummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Phase1Config:
     ocr_gpu:        bool   = False
-    ocr_backend:    str    = "easyocr"
+    ocr_backend:    str    = "tesseract"
     ocr_dpi:        int    = 200
-    diacritize:     bool   = True
     max_tokens:     int    = 1500
     overlap_tokens: int    = 200
     output_dir:     str    = "output"
@@ -35,19 +34,25 @@ class Phase1Config:
     # "digital" — force PyMuPDF extraction for all pages
     # "ocr"     — force OCR for all pages regardless of content
     pdf_mode:       str    = "auto"
+    # LLM summarization
+    anthropic_api_key: str = ""
+    script_genre:   str    = "non-fiction"   # hint for Scriptwriter tone
 
 
 @dataclass
 class Phase1Result:
-    source_path:  str
-    pdf_type:     str
-    total_pages:  int
-    chunks:       list[Chunk]
-    json_path:    Path
-    txt_path:     Path
-    raw_txt_path: Path          # ← new: pre-processing snapshot
-    elapsed_sec:  float
-    warnings:     list[str] = field(default_factory=list)
+    source_path:       str
+    pdf_type:          str
+    total_pages:       int
+    chunks:            list[Chunk]
+    json_path:         Path
+    txt_path:          Path
+    raw_txt_path:      Path
+    script_path:       Path | None = None
+    script_diac_path:  Path | None = None
+    script_meta_path:  Path | None = None
+    elapsed_sec:       float = 0.0
+    warnings:          list[str] = field(default_factory=list)
 
 
 class Phase1Pipeline:
@@ -109,49 +114,63 @@ class Phase1Pipeline:
                 page.raw_text_pre = page.raw_text   # OCR output = raw baseline
 
         # ── Step 3: Normalise ─────────────────────────────────────────── #
-        self._progress("Normalising Arabic text …", 0.40)
+        self._progress("Normalising Arabic text …", 0.35)
         normalizer = ArabicTextNormalizer()
         ingestion.pages = normalizer.normalize_pages(ingestion.pages)
 
-        # ── Step 4: Diacritize ────────────────────────────────────────── #
-        if self.cfg.diacritize:
-            self._progress("Diacritizing (adding Harakat) …", 0.58)
-            diacritizer = FarasaDiacritizer(
-                chunk_size = self.cfg.max_tokens,
-            )
-            try:
-                ingestion.pages = diacritizer.diacritize_pages(ingestion.pages)
-            except Exception as exc:  # noqa: BLE001
-                warnings.append(f"Diacritization failed — skipped: {exc}")
-                logger.warning(warnings[-1])
-
-        # ── Step 5: Chunk ─────────────────────────────────────────────── #
-        self._progress("Chunking into LLM-ready pieces …", 0.76)
+        # ── Step 4: Chunk ─────────────────────────────────────────────── #
+        self._progress("Chunking text …", 0.50)
         chunker = SemanticChunker(
             max_tokens     = self.cfg.max_tokens,
             overlap_tokens = self.cfg.overlap_tokens,
         )
         chunks = chunker.chunk_pages(ingestion.pages)
 
-        # ── Step 6: Write output ──────────────────────────────────────── #
-        self._progress("Writing output files …", 0.90)
+        # ── Step 5: Write extraction output ──────────────────────────── #
+        self._progress("Writing extraction output …", 0.62)
         writer = OutputWriter(output_dir=self.cfg.output_dir)
         json_path, txt_path, raw_txt_path = writer.write(ingestion, chunks)
+
+        # ── Step 6: Summarize → Script → Diacritize ───────────────────── #
+        script_path = script_diac_path = script_meta_path = None
+        if self.cfg.anthropic_api_key and chunks:
+            try:
+                self._progress("Summarising book (Reader + Consolidator) …", 0.70)
+                summarizer = BookSummarizer(
+                    api_key    = self.cfg.anthropic_api_key,
+                    genre      = self.cfg.script_genre,
+                    output_dir = self.cfg.output_dir,
+                )
+                self._progress("Writing script (Scriptwriter) …", 0.82)
+                script_path, script_diac_path, script_meta_path = summarizer.run(
+                    chunks       = chunks,
+                    title        = ingestion.metadata.get("title", ""),
+                    on_progress  = self._progress,
+                )
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Summarization failed: {exc}")
+                logger.warning(warnings[-1])
+        elif not self.cfg.anthropic_api_key:
+            warnings.append("No Anthropic API key — script generation skipped.")
+            logger.info(warnings[-1])
 
         elapsed = time.perf_counter() - t0
         self._progress("Done ✓", 1.0)
         logger.info("Phase 1 complete in %.1fs — %d chunks.", elapsed, len(chunks))
 
         return Phase1Result(
-            source_path  = str(pdf_path),
-            pdf_type     = ingestion.pdf_type,
-            total_pages  = ingestion.total_pages,
-            chunks       = chunks,
-            json_path    = json_path,
-            txt_path     = txt_path,
-            raw_txt_path = raw_txt_path,
-            elapsed_sec  = elapsed,
-            warnings     = warnings,
+            source_path       = str(pdf_path),
+            pdf_type          = ingestion.pdf_type,
+            total_pages       = ingestion.total_pages,
+            chunks            = chunks,
+            json_path         = json_path,
+            txt_path          = txt_path,
+            raw_txt_path      = raw_txt_path,
+            script_path       = script_path,
+            script_diac_path  = script_diac_path,
+            script_meta_path  = script_meta_path,
+            elapsed_sec       = elapsed,
+            warnings          = warnings,
         )
 
     def _progress(self, step: str, pct: float):

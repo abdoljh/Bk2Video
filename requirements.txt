@@ -27,9 +27,11 @@ pytesseract>=0.3.10
 Pillow>=10.0.0
 numpy>=1.24.0
 
-# Diacritization
-# farasapy: local toolkit wrapper — requires Java at runtime; works on
-#   machines with Java installed (local dev). Falls back to mishkal on
-#   Streamlit Cloud (no Java).
-farasapy>=0.1.1
+# Diacritization (applied only to final script, not raw OCR text)
+# Mishkal: local, no API cost, good for clean MSA text.
+# farasapy: higher accuracy but requires Java — local dev only.
 mishkal
+# farasapy>=0.1.1
+
+# LLM summarization & script generation
+anthropic>=0.40.0

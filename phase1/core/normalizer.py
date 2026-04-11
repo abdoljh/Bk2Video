@@ -124,24 +124,47 @@ class ArabicTextNormalizer:
     """
 
     _NOISE_PATTERNS = [
-        re.compile(r"^\s*\d+\s*$", re.MULTILINE),
-        re.compile(r"[\u200b\u200c\u200d\ufeff]"),
-        re.compile(r"[ \t]{3,}", re.MULTILINE),
-        re.compile(r"\n{4,}", re.MULTILINE),
+        re.compile(r"^\s*\d+\s*$", re.MULTILINE),          # lone page numbers
+        re.compile(r"[\u200b\u200c\u200d\ufeff]"),          # zero-width chars
+        re.compile(r"[ \t]{3,}", re.MULTILINE),             # excessive spaces
+        re.compile(r"\n{4,}", re.MULTILINE),                # excessive blank lines
     ]
+
+    # Running header pattern: a short line (≤ 60 chars) that contains a
+    # digit — typical of "Book Title  17" or "17  Chapter Name" headers
+    # that Tesseract picks up at the top of each scanned page.
+    _HEADER_PATTERN = re.compile(
+        r"^[^\n]{1,60}\d[^\n]{0,30}\n",
+        re.MULTILINE,
+    )
+
+    # Footnote pattern: lines starting with (n) or * followed by content,
+    # OR a horizontal rule (─────) followed by footnote text.
+    _FOOTNOTE_PATTERN = re.compile(
+        r"(?:^[─━═\-]{4,}.*$\n?(?:^.+\n?)*)"   # separator + following lines
+        r"|(?:^\s*[\(\[（【]\d+[\)\]）】][^\n]*\n?)",  # (1) ... footnote lines
+        re.MULTILINE,
+    )
 
     def normalize(self, text: str, source: Source = "digital") -> str:
         if not text or not text.strip():
             return ""
 
+        if source == "scanned":
+            text = self._strip_page_furniture(text)
+            if not text.strip():
+                return ""
+
         text = unicodedata.normalize("NFC", text)
 
-        # Normalise U+06BE (Heh Doachashmee ھ) to U+0647 (Arabic Heh ه).
-        # Presentation-form PDFs sometimes store the heh letter as the
-        # Urdu/Pashto variant (U+06BE) or its positional forms (FBAB/FBAD).
-        # NFKC decomposed FBAB/FBAD → U+06BE but doesn't unify with U+0647.
-        # In standard Arabic text U+06BE is a display-artefact — normalise it.
-        text = text.replace('\u06BE', '\u0647')
+        # Normalise non-standard Arabic letter variants to their MSA forms.
+        # U+06BE Heh Doachashmee (ھ) → U+0647 Arabic Heh (ه)
+        # U+06CC Farsi Yeh (ی)        → U+064A Arabic Yeh (ي)
+        # U+0649 Alef Maqsura (ى)     kept as-is (valid MSA word-final form)
+        # These variants appear in OCR output from Urdu/Persian-influenced fonts
+        # and cause Mishkal and other Arabic NLP tools to silently drop the text.
+        text = text.replace('\u06BE', '\u0647')   # ھ → ه
+        text = text.replace('\u06CC', '\u064A')   # ی → ي
 
         # Apply article fix word-by-word
         text = " ".join(fix_article(w) for w in text.split(" "))
@@ -173,6 +196,44 @@ class ArabicTextNormalizer:
             logger.debug("Page %d [%s] normalised: %d → %d chars",
                          page.page_number, source, before, len(page.raw_text))
         return pages
+
+    def _strip_page_furniture(self, text: str) -> str:
+        """
+        Remove running headers and footnotes from scanned OCR output.
+
+        Running headers: short lines containing a digit that appear at the
+        very start of a page block (e.g. "مذكرات جعفر العسكري  17").
+        We strip only the FIRST such line in each page section to avoid
+        removing legitimate short sentences in the body.
+
+        Footnotes: blocks starting with (n) or a horizontal separator line.
+        """
+        lines = text.splitlines()
+        cleaned = []
+        skip_next = False
+        for i, line in enumerate(lines):
+            if skip_next:
+                skip_next = False
+                continue
+            stripped = line.strip()
+            # Skip standalone page numbers
+            if re.match(r'^\d+$', stripped):
+                continue
+            # Skip short lines with digits at start/end of page block
+            # (running headers like "مقدمة  37" or "37 مقدمة")
+            if (len(stripped) <= 60
+                    and re.search(r'\d', stripped)
+                    and re.search(r'[\u0600-\u06FF]', stripped)
+                    and (i == 0 or not lines[i-1].strip())):
+                continue
+            # Skip footnote separator lines
+            if re.match(r'^[─━═\-─]{4,}', stripped):
+                continue
+            # Skip footnote content lines: (1) or [1] at line start
+            if re.match(r'^[\(\[（【]\d+[\)\]）】]', stripped):
+                continue
+            cleaned.append(line)
+        return "\n".join(cleaned)
 
     def _clean(self, text: str) -> str:
         for pat in self._NOISE_PATTERNS:

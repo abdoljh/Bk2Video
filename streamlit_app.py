@@ -124,10 +124,10 @@ st.markdown("""
 <div class="app-header">
   <div class="eyebrow">Arabic Book Brief Engine · Phase 1</div>
   <h1>Extraction &amp; Pre-processing</h1>
-  <div class="sub">Auto-detect PDF type · OCR scanned pages · Normalise Arabic · Diacritize · Chunk</div>
+  <div class="sub">Auto-detect PDF type · OCR scanned pages · Normalise Arabic · Chunk · Generate Arabic video script</div>
   <div>
     <span class="badge b-gold">Auto-Detect</span>
-    <span class="badge b-teal">Farasa Diacritizer</span>
+    <span class="badge b-teal">Mishkal Diacritizer</span>
     <span class="badge b-rust">Semantic Chunking</span>
   </div>
 </div>
@@ -157,22 +157,31 @@ with st.sidebar:
         index=0,
         help=(
             "**Tesseract** — lightweight, works on Streamlit Cloud.\n\n"
-            "**EasyOCR** — better accuracy but needs ~1 GB RAM (PyTorch); "
-            "use locally.\n\n"
-            "**PaddleOCR** — best Arabic accuracy (PP-OCRv3-ar model) but "
-            "requires Python ≤ 3.12; use locally: "
-            "`pip install paddlepaddle paddleocr`."
+            "**EasyOCR** — better accuracy but needs ~1 GB RAM (PyTorch); local only.\n\n"
+            "**PaddleOCR** — best Arabic accuracy; requires Python ≤ 3.12; local only."
         ),
     )
-    ocr_gpu     = st.toggle("Use GPU for OCR", value=False)
-    ocr_dpi     = st.slider("Scan DPI", 150, 400, 200, step=50)
-
-    st.markdown("#### Diacritization")
-    diacritize   = st.toggle("Enable Diacritization (Harakat)", value=True)
+    ocr_gpu = st.toggle("Use GPU for OCR", value=False)
+    ocr_dpi = st.slider("Scan DPI", 150, 400, 200, step=50)
 
     st.markdown("#### Chunking")
     max_tokens     = st.slider("Max Tokens / Chunk", 500, 3000, 1500, step=100)
     overlap_tokens = st.slider("Overlap Tokens",       0,  500,  200, step=50)
+
+    st.markdown("#### Script Generation")
+    anthropic_key = st.text_input(
+        "Anthropic API Key",
+        type="password",
+        value=st.secrets.get("ANTHROPIC_API_KEY", ""),
+        help="Required for script generation. Leave blank to extract text only.",
+    )
+    script_genre = st.selectbox(
+        "Book Genre",
+        ["non-fiction", "history", "biography", "novel",
+         "philosophy", "science", "religion"],
+        index=0,
+        help="Affects the tone of the generated script.",
+    )
 
     st.markdown("---")
     st.markdown(
@@ -189,10 +198,10 @@ with col_info:
     st.markdown("""
     **What Phase 1 produces:**
     - PDF type detected (digital / scanned / mixed)
-    - Normalised Arabic (BiDi + reshaping)
-    - Diacritized text ready for TTS
+    - Normalised Arabic text (lam-alef fixes + noise removal)
     - Semantic chunks with chapter metadata
     - **JSON** + **plain text** downloads
+    - 700-800 word Arabic video **script** (plain + diacritized)
     """)
 
 # ── Run ───────────────────────────────────────────────────────────────── #
@@ -223,9 +232,10 @@ if uploaded:
             cfg = Phase1Config(
                 pdf_mode=pdf_mode,
                 ocr_gpu=ocr_gpu, ocr_backend=ocr_backend, ocr_dpi=ocr_dpi,
-                diacritize=diacritize,
                 max_tokens=max_tokens, overlap_tokens=overlap_tokens,
                 output_dir=str(output_dir),
+                anthropic_api_key=anthropic_key,
+                script_genre=script_genre,
             )
 
             try:
@@ -238,6 +248,25 @@ if uploaded:
                 st.session_state["json_name"]     = result.json_path.name
                 st.session_state["txt_name"]      = result.txt_path.name
                 st.session_state["raw_txt_name"]  = result.raw_txt_path.name
+                # Script outputs (only present when API key was supplied)
+                if result.script_path and result.script_path.exists():
+                    st.session_state["script_bytes"]      = result.script_path.read_bytes()
+                    st.session_state["script_name"]       = result.script_path.name
+                else:
+                    st.session_state.pop("script_bytes", None)
+                    st.session_state.pop("script_name", None)
+                if result.script_diac_path and result.script_diac_path.exists():
+                    st.session_state["script_diac_bytes"] = result.script_diac_path.read_bytes()
+                    st.session_state["script_diac_name"]  = result.script_diac_path.name
+                else:
+                    st.session_state.pop("script_diac_bytes", None)
+                    st.session_state.pop("script_diac_name", None)
+                if result.script_meta_path and result.script_meta_path.exists():
+                    st.session_state["script_meta_bytes"] = result.script_meta_path.read_bytes()
+                    st.session_state["script_meta_name"]  = result.script_meta_path.name
+                else:
+                    st.session_state.pop("script_meta_bytes", None)
+                    st.session_state.pop("script_meta_name", None)
                 st.session_state["result_meta"] = {
                     "pdf_type":    result.pdf_type,
                     "total_pages": result.total_pages,
@@ -298,7 +327,7 @@ if "result_meta" in st.session_state:
     </div>
     """, unsafe_allow_html=True)
 
-    # Downloads
+    # Downloads — extraction outputs
     st.markdown("#### 📥 Downloads")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -314,6 +343,58 @@ if "result_meta" in st.session_state:
                            file_name=st.session_state.get("raw_txt_name", "raw.txt"),
                            mime="text/plain", use_container_width=True,
                            help="Text straight from PyMuPDF/OCR before any normalisation")
+
+    # Downloads — script outputs (only shown when script was generated)
+    if "script_bytes" in st.session_state:
+        st.markdown("#### 📝 Arabic Video Script")
+        # Show metadata summary
+        if "script_meta_bytes" in st.session_state:
+            try:
+                smeta = json.loads(st.session_state["script_meta_bytes"])
+                scores = smeta.get("scores", {})
+                total  = smeta.get("total_score", 0)
+                wc     = smeta.get("word_count", 0)
+                retries = smeta.get("retries_used", 0)
+                score_bar = " · ".join(f"{k} {v}/10" for k, v in scores.items())
+                st.markdown(
+                    f"<div class='metric-row'>"
+                    f"<div class='metric-card'><div class='val'>{wc}</div><div class='lbl'>Words</div></div>"
+                    f"<div class='metric-card teal'><div class='val'>{total}/50</div><div class='lbl'>Score</div></div>"
+                    f"<div class='metric-card rust'><div class='val'>{retries}</div><div class='lbl'>Retries</div></div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"Criteria: {score_bar}")
+                feedback = smeta.get("editor_feedback", "")
+                if feedback:
+                    st.caption(f"Editor: {feedback}")
+            except Exception:
+                pass
+
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            st.download_button("⬇ Script (plain)", data=st.session_state["script_bytes"],
+                               file_name=st.session_state["script_name"],
+                               mime="text/plain", use_container_width=True)
+        with sc2:
+            st.download_button("⬇ Script (diacritized)", data=st.session_state.get("script_diac_bytes", b""),
+                               file_name=st.session_state.get("script_diac_name", "script_diac.txt"),
+                               mime="text/plain", use_container_width=True)
+        with sc3:
+            st.download_button("⬇ Script metadata", data=st.session_state.get("script_meta_bytes", b""),
+                               file_name=st.session_state.get("script_meta_name", "script_meta.json"),
+                               mime="application/json", use_container_width=True)
+
+        with st.expander("📄 Preview script"):
+            script_txt = st.session_state["script_bytes"].decode("utf-8", errors="replace")
+            st.markdown(
+                f"<div style='direction:rtl;text-align:right;font-size:0.95rem;"
+                f"line-height:1.9;background:#fefcf8;padding:1.2rem 1.5rem;"
+                f"border:1px solid #e0dbd0;border-radius:4px'>{script_txt}</div>",
+                unsafe_allow_html=True,
+            )
+    elif anthropic_key:
+        st.info("Script generation ran but produced no output — check warnings above.")
 
     # Chunk preview
     st.markdown("#### 🔍 Chunk Preview")
@@ -333,7 +414,7 @@ if "result_meta" in st.session_state:
         )
 
     with st.expander("🔬 Compare: raw extract vs processed"):
-        st.caption("Left = straight from PyMuPDF/OCR · Right = after normalisation & diacritization")
+        st.caption("Left = straight from PyMuPDF/OCR · Right = after normalisation")
         rc1, rc2 = st.columns(2)
         with rc1:
             st.markdown("**Raw extract**")
