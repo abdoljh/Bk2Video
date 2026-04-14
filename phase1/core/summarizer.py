@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 _HAIKU  = "claude-haiku-4-5"
 _SONNET = "claude-sonnet-4-6"
 
-_SCORE_PASS = 35   # out of 50
+_SCORE_PASS  = 35   # out of 50
+_MIN_WORDS   = 550  # reject scripts shorter than this regardless of score
 _MAX_RETRIES = 2
 
 # ── Genre → tone mapping ─────────────────────────────────────────────── #
@@ -194,19 +195,24 @@ class BookSummarizer:
         revision_note = (
             f"\nملاحظات المحرر للمراجعة:\n{feedback}\n" if feedback else ""
         )
+        title_line = f"«{title}» " if title else ""
         prompt = (
             f"أنت كاتب سيناريو محترف متخصص في المحتوى الثقافي العربي.\n"
-            f"بناءً على المخطط التالي لكتاب «{title}» من نوع {self.genre}،\n"
+            f"بناءً على المخطط التالي لكتاب {title_line}من نوع {self.genre}،\n"
             "اكتب سكريبت بالعربية الفصحى لفيديو مدته 4-5 دقائق (700-800 كلمة) يشتمل على:\n"
             "1. خطاف افتتاحي مشوّق — الجملة الأولى تجذب الانتباه فوراً\n"
             "2. ثلاث نقاط محورية من الكتاب مع أمثلة أو لحظات بارزة\n"
             "3. خاتمة تدفع المستمع للتفكير أو القراءة\n"
+            "4. تقديم رسمي للكتاب في نهاية السكريبت: اذكر عنوان الكتاب واسم المؤلف،\n"
+            "   وأبرز ما يجده القارئ بين دفتيه، ثم ادعُ المشاهد صراحةً لاقتناء الكتاب وقراءته.\n"
             f"النبرة: {tone}.\n"
             "لا تبدأ بـ'في هذا الفيديو' أو ما شابهها. لا تذكر كلمة 'سكريبت'.\n"
+            "مهم جداً: أكمل كل جملة حتى نهايتها الطبيعية حتى لو تجاوزت حد الكلمات قليلاً.\n"
+            "لا تقطع أي جملة في المنتصف بأي حال من الأحوال.\n"
             f"{revision_note}"
             f"\nمخطط الكتاب:\n{outline}"
         )
-        return self._call(prompt, model=_SONNET, max_tokens=1200)
+        return self._call(prompt, model=_SONNET, max_tokens=2500)
 
     # ------------------------------------------------------------------ #
     #  Step 6 — Editor / Scorer (Haiku, up to 2 retries)                  #
@@ -262,12 +268,22 @@ class BookSummarizer:
 
             scores, feedback = self._score_script(script)
             total = sum(scores.values())
+            word_count = len(script.split())
             logger.info(
                 "Script attempt %d — score %d/50, words %d",
-                attempt + 1, total, len(script.split()),
+                attempt + 1, total, word_count,
             )
-            if total >= _SCORE_PASS:
+            # Accept only if both quality threshold and minimum length are met.
+            # A truncated script can still score above _SCORE_PASS on quality
+            # alone, so we enforce a hard floor to catch max_tokens truncation.
+            if total >= _SCORE_PASS and word_count >= _MIN_WORDS:
                 break
+            if word_count < _MIN_WORDS:
+                feedback = (
+                    f"السكريبت ناقص ({word_count} كلمة فقط من أصل 700-800 مطلوبة). "
+                    "اكتب السكريبت كاملاً مع جميع الأقسام الأربعة وأكمل كل جملة.\n"
+                    + feedback
+                )
             retries += 1
 
         return ScriptResult(
