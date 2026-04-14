@@ -535,11 +535,21 @@ if p2_text:
                     logging.exception("Phase 2 TTS error")
 
 if "p2_audio_bytes" in st.session_state:
-    st.audio(st.session_state["p2_audio_bytes"], format="audio/mp3")
+    import base64
+    audio_bytes = st.session_state["p2_audio_bytes"]
+    # st.audio can fail for large MP3s or non-standard MIME strings.
+    # An inline <audio> element with the correct IANA type is more reliable.
+    b64 = base64.b64encode(audio_bytes).decode()
+    st.markdown(
+        f'<audio controls style="width:100%;margin:0.5rem 0">'
+        f'<source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg">'
+        f'</audio>',
+        unsafe_allow_html=True,
+    )
     dl_name = f"book_audio_{st.session_state.get('p2_audio_label', 'output')}.mp3"
     st.download_button(
         "⬇ Download MP3",
-        data=st.session_state["p2_audio_bytes"],
+        data=audio_bytes,
         file_name=dl_name,
         mime="audio/mpeg",
         use_container_width=True,
