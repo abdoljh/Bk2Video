@@ -28,7 +28,8 @@ _HAIKU  = "claude-haiku-4-5"
 _SONNET = "claude-sonnet-4-6"
 
 _SCORE_PASS  = 35   # out of 50
-_MIN_WORDS   = 650  # reject scripts shorter than this regardless of score
+_MIN_WORDS   = 625  # acceptable word-count range — lower bound
+_MAX_WORDS   = 850  # acceptable word-count range — upper bound
 _MAX_RETRIES = 2
 
 # ── Genre → tone mapping ─────────────────────────────────────────────── #
@@ -199,7 +200,7 @@ class BookSummarizer:
         prompt = (
             f"أنت كاتب سيناريو محترف متخصص في المحتوى الثقافي العربي.\n"
             f"بناءً على المخطط التالي لكتاب {title_line}من نوع {self.genre}،\n"
-            "اكتب سكريبت بالعربية الفصحى لفيديو مدته 4-5 دقائق (700-800 كلمة) يشتمل على:\n"
+            "اكتب سكريبت بالعربية الفصحى لفيديو مدته 4-5 دقائق (625-850 كلمة) يشتمل على:\n"
             "1. خطاف افتتاحي مشوّق — الجملة الأولى تجذب الانتباه فوراً\n"
             "2. ثلاث نقاط محورية من الكتاب مع أمثلة أو لحظات بارزة\n"
             "3. خاتمة تدفع المستمع للتفكير أو القراءة\n"
@@ -229,7 +230,7 @@ class BookSummarizer:
             "أجب بتنسيق JSON فقط بالمفاتيح التالية:\n"
             '{"hook": <0-10>, "structure": <0-10>, "pacing": <0-10>, '
             '"clarity": <0-10>, "tone": <0-10>, "feedback": "<نص>"}\n\n'
-            f"عدد الكلمات: {word_count} (المطلوب: 700-800)\n\n"
+            f"عدد الكلمات: {word_count} (المطلوب: {_MIN_WORDS}-{_MAX_WORDS})\n\n"
             f"السكريبت:\n{script[:2500]}"
         )
         try:
@@ -275,15 +276,25 @@ class BookSummarizer:
                 "Script attempt %d — score %d/50, words %d",
                 attempt + 1, total, word_count,
             )
-            # Accept only if both quality threshold and minimum length are met.
-            # A truncated script can still score above _SCORE_PASS on quality
-            # alone, so we enforce a hard floor to catch max_tokens truncation.
-            if total >= _SCORE_PASS and word_count >= _MIN_WORDS:
+            # Accept when quality threshold AND word count are both in range.
+            # Separate feedback for each out-of-range case keeps retries targeted
+            # and avoids wasteful loops when the model naturally lands in range.
+            too_short = word_count < _MIN_WORDS
+            too_long  = word_count > _MAX_WORDS
+            if total >= _SCORE_PASS and not too_short and not too_long:
                 break
-            if word_count < _MIN_WORDS:
+            if too_short:
                 feedback = (
-                    f"السكريبت ناقص ({word_count} كلمة فقط من أصل 700-800 مطلوبة). "
-                    "اكتب السكريبت كاملاً مع جميع الأقسام الأربعة وأكمل كل جملة.\n"
+                    f"السكريبت قصير ({word_count} كلمة). "
+                    f"المطلوب بين {_MIN_WORDS} و{_MAX_WORDS} كلمة. "
+                    "أكمل الأقسام الناقصة وتأكد من اكتمال كل جملة.\n"
+                    + feedback
+                )
+            elif too_long:
+                feedback = (
+                    f"السكريبت طويل ({word_count} كلمة). "
+                    f"المطلوب بين {_MIN_WORDS} و{_MAX_WORDS} كلمة. "
+                    "اختصر دون حذف الأقسام الأربعة أو إخلال بجودة المحتوى.\n"
                     + feedback
                 )
             retries += 1
