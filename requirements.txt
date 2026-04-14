@@ -35,3 +35,8 @@ mishkal
 
 # LLM summarization & script generation
 anthropic>=0.40.0
+
+# ── Phase 2 — Audio Generation ──────────────────────────────────────────
+# TTS backends
+gTTS>=2.5.0            # free Google TTS fallback (development use, lang='ar')
+# elevenlabs>=1.0.0    # premium Arabic voices — install locally when needed
