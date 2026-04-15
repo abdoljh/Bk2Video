@@ -201,6 +201,26 @@ with st.sidebar:
         el_voice_id = st.text_input("Voice ID", placeholder="e.g. Chaouki voice ID", key="el_voice")
 
     st.markdown("---")
+    st.markdown("#### 🎬 Phase 3: Visuals")
+    pexels_api_key = st.text_input(
+        "Pexels API Key",
+        type="password",
+        key="p3_pexels_key",
+        help=(
+            "Free API key from pexels.com/api. "
+            "Used as fallback when Wikimedia has no images for a section. "
+            "Leave blank to use Wikimedia only."
+        ),
+    )
+    p3_color_grade = st.selectbox(
+        "Color Grade",
+        ["warm", "neutral", "cool"],
+        index=0,
+        key="p3_color_grade",
+        help="warm — amber/gold tone · neutral — no adjustment · cool — blue tones",
+    )
+
+    st.markdown("---")
     st.markdown(
         "<span style='font-family:DM Mono,monospace;font-size:0.6rem;"
         "color:#6b6355;letter-spacing:.1em'>ARABIC BOOK BRIEF ENGINE v1.0</span>",
@@ -554,4 +574,157 @@ if "p2_audio_bytes" in st.session_state:
         mime="audio/mpeg",
         use_container_width=True,
         key="p2_dl",
+    )
+
+# ── Phase 3: Visual Generation ────────────────────────────────────────── #
+st.markdown("---")
+st.markdown("""
+<div class="app-header" style="margin-top:1rem">
+  <div class="eyebrow">Arabic Book Brief Engine · Phase 3</div>
+  <h1>Visual Generation</h1>
+  <div class="sub">Build a dynamic background video · Wikimedia real photographs · Ken Burns effect</div>
+  <div>
+    <span class="badge b-gold">Wikimedia Commons</span>
+    <span class="badge b-teal">Ken Burns Effect</span>
+    <span class="badge b-rust">Pexels Fallback</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Script source ─────────────────────────────────────────────────────── #
+p3_script_src = st.radio(
+    "Script source",
+    ["Phase 1 output", "Upload .txt file"],
+    horizontal=True,
+    key="p3_script_src",
+    help="Use a script already in session, or upload book_script_rev.txt / book_script.txt.",
+)
+
+p3_text = ""
+if p3_script_src == "Phase 1 output":
+    if "script_bytes" in st.session_state:
+        p3_text = st.session_state["script_bytes"].decode("utf-8", errors="replace")
+    else:
+        st.info("No Phase 1 script in session — switch to **Upload .txt file**.")
+else:
+    p3_up = st.file_uploader("Upload script (.txt)", type=["txt"], key="p3_script_up")
+    if p3_up:
+        p3_text = p3_up.read().decode("utf-8", errors="replace")
+
+# ── Audio source (for duration timing) ───────────────────────────────── #
+p3_audio_bytes: bytes | None = None
+if "p2_audio_bytes" in st.session_state:
+    p3_audio_bytes = st.session_state["p2_audio_bytes"]
+    st.caption("Using Phase 2 audio for section timing.")
+else:
+    p3_audio_up = st.file_uploader(
+        "Upload audio (.mp3) for timing — optional",
+        type=["mp3"],
+        key="p3_audio_up",
+        help="Lets the pipeline size each section accurately. "
+             "Skip to use a character-count estimate.",
+    )
+    if p3_audio_up:
+        p3_audio_bytes = p3_audio_up.read()
+
+# ── Genre (passed to keyword generator) ──────────────────────────────── #
+p3_genre = st.selectbox(
+    "Book genre",
+    ["history", "biography", "non-fiction", "philosophy",
+     "science", "religion", "novel"],
+    index=0,
+    key="p3_genre",
+    help="Affects Wikimedia search terms and colour-grade default.",
+)
+
+# ── Generate button ───────────────────────────────────────────────────── #
+if p3_text:
+    with st.expander("Preview script sections"):
+        try:
+            from phase3.parser import parse_sections
+            p3_secs = parse_sections(p3_text)
+            for s in p3_secs:
+                st.markdown(
+                    f"<div style='font-family:DM Mono,monospace;font-size:0.7rem;"
+                    f"color:#c9a84c;margin-top:0.6rem'>{s.section_id.upper()}</div>"
+                    f"<div style='direction:rtl;text-align:right;font-size:0.85rem;"
+                    f"line-height:1.7'>{s.text[:200]}{'…' if len(s.text)>200 else ''}</div>",
+                    unsafe_allow_html=True,
+                )
+        except Exception:
+            st.text(p3_text[:600])
+
+    if st.button("▶ Generate Background Video", type="primary",
+                 use_container_width=True, key="p3_gen"):
+        import tempfile as _tmp
+        _out_dir = Path(_tmp.mkdtemp(prefix="bk2v_out_"))
+        _out_mp4 = _out_dir / "background_video.mp4"
+        _thumb   = _out_dir / "thumb.jpg"
+
+        _p3_progress = st.progress(0.0)
+        _p3_status   = st.empty()
+        _p3_log      = st.empty()
+        _p3_lines: list[str] = []
+
+        def _p3_cb(label: str, frac: float) -> None:
+            _p3_progress.progress(min(frac, 1.0))
+            _p3_status.markdown(f"**{label}**")
+            cls = "done" if frac >= 1.0 else "active"
+            _p3_lines.append(
+                f"<span class='{cls}'>{'✓' if frac>=1.0 else '›'} {label}</span>"
+            )
+            _p3_log.markdown(
+                "<div class='step-log'>" + "<br>".join(_p3_lines[-12:]) + "</div>",
+                unsafe_allow_html=True,
+            )
+
+        try:
+            from phase3 import generate_background_video
+            from phase3.compositor import extract_thumbnail
+
+            generate_background_video(
+                script_text=p3_text,
+                output_path=_out_mp4,
+                audio_bytes=p3_audio_bytes,
+                anthropic_api_key=anthropic_key,
+                pexels_api_key=pexels_api_key,
+                genre=p3_genre,
+                color_grade=p3_color_grade,
+                images_per_section=3,
+                on_progress=_p3_cb,
+            )
+
+            st.session_state["p3_video_bytes"] = _out_mp4.read_bytes()
+
+            # Extract a preview thumbnail from the middle of the video
+            extract_thumbnail(_out_mp4, _thumb, time=5.0)
+            if _thumb.exists():
+                st.session_state["p3_thumb_bytes"] = _thumb.read_bytes()
+
+            _p3_status.success("Background video ready ✓")
+
+        except Exception as _exc:
+            st.error(f"Video generation failed: {_exc}")
+            logging.exception("Phase 3 error")
+        finally:
+            import shutil as _sh
+            _sh.rmtree(_out_dir, ignore_errors=True)
+
+if "p3_video_bytes" in st.session_state:
+    # Thumbnail preview (video itself is too large for in-browser base64 embed)
+    if "p3_thumb_bytes" in st.session_state:
+        st.image(
+            st.session_state["p3_thumb_bytes"],
+            caption="First frame preview",
+            use_container_width=True,
+        )
+    p3_sz_mb = len(st.session_state["p3_video_bytes"]) / 1_048_576
+    st.caption(f"Background video · {p3_sz_mb:.1f} MB · 720p silent .mp4")
+    st.download_button(
+        "⬇ Download Background Video (.mp4)",
+        data=st.session_state["p3_video_bytes"],
+        file_name="background_video.mp4",
+        mime="video/mp4",
+        use_container_width=True,
+        key="p3_dl",
     )
