@@ -1,0 +1,31 @@
+
+[     UTC     ] Logs for bk2video.streamlit.app/
+────────────────────────────────────────────────────────────────────────────────────────
+[16:44:06] 🖥 Provisioning machine...
+[16:44:06] 🎛 Preparing system...
+[16:44:06] ⛓ Spinning up manager process...
+[16:44:04] 🚀 Starting up repository: 'bk2video', branch: 'main', main module: 'streamlit_app.py'
+[16:44:04] 🐙 Cloning repository...
+[16:44:11] 🐙 Cloning into '/mount/src/bk2video'...
+
+[16:44:11] 🐙 Cloned repository!
+[16:44:11] 🐙 Pulling code changes from Github...
+[16:44:13] 📦 Processing dependencies...
+[16:44:13] 📦 Apt dependencies were installed from /mount/src/bk2video/packages.txt using apt-get.
+Get:1 http://deb.debian.org/debian-security bullseye-security InRelease [27.2 kB]
+Hit:2 http://deb.debian.org/debian trixie InRelease
+Get:3 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+Get:4 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+Get:5 http://deb.debian.org/debian-security bullseye-security/main amd64 Packages [446 kB]
+Get:6 https://packages.microsoft.com/debian/11/prod bullseye InRelease [3650 B]
+Get:7 http://deb.debian.org/debian-security trixie-security/main amd64 Packages [123 kB]
+Get:8 https://packages.microsoft.com/debian/11/prod bullseye/main amd64 Packages [213 kB]
+Get:9 https://packages.microsoft.com/debian/11/prod bullseye/main arm64 Packages [72.3 kB]
+Fetched 976 kB in 0s (4381 kB/s)
+Reading package lists...[2026-04-15 16:44:14.370975] 
+Reading package lists...[2026-04-15 16:44:15.160177] 
+Building dependency tree...[2026-04-15 16:44:15.422609] 
+Reading state information...
+E: Unable to locate package fonts-noto-arabic
+[16:44:15] ❗️ installer returned a non-zero exit code
+[16:44:15] ❗️ Error during processing dependencies! Please fix the error and push an update, or try restarting the app.
