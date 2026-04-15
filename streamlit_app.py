@@ -581,12 +581,13 @@ st.markdown("---")
 st.markdown("""
 <div class="app-header" style="margin-top:1rem">
   <div class="eyebrow">Arabic Book Brief Engine · Phase 3</div>
-  <h1>Visual Generation</h1>
-  <div class="sub">Build a dynamic background video · Wikimedia real photographs · Ken Burns effect</div>
+  <h1>Final Video Assembly</h1>
+  <div class="sub">Visuals · Arabic voice · Burned-in subtitles · Complete MP4</div>
   <div>
     <span class="badge b-gold">Wikimedia Commons</span>
     <span class="badge b-teal">Ken Burns Effect</span>
     <span class="badge b-rust">Pexels Fallback</span>
+    <span class="badge b-teal">Arabic Subtitles</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -671,11 +672,18 @@ if p3_text:
         except Exception:
             st.text(p3_text[:600])
 
-    if st.button("▶ Generate Background Video", type="primary",
+    p3_add_subs = st.checkbox(
+        "Burn Arabic subtitles into video",
+        value=True,
+        key="p3_add_subs",
+        help="Overlays the script text as timed Arabic captions (white text, black outline).",
+    )
+
+    if st.button("▶ Generate Final Video", type="primary",
                  use_container_width=True, key="p3_gen"):
         import tempfile as _tmp
         _out_dir = Path(_tmp.mkdtemp(prefix="bk2v_out_"))
-        _out_mp4 = _out_dir / "background_video.mp4"
+        _out_mp4 = _out_dir / "final_video.mp4"
         _thumb   = _out_dir / "thumb.jpg"
 
         _p3_progress = st.progress(0.0)
@@ -710,6 +718,7 @@ if p3_text:
                 images_per_section=3,
                 book_title=p3_book_title,
                 character_name=p3_character_name,
+                add_subtitles=p3_add_subs,
                 on_progress=_p3_cb,
             )
 
@@ -720,7 +729,7 @@ if p3_text:
             if _thumb.exists():
                 st.session_state["p3_thumb_bytes"] = _thumb.read_bytes()
 
-            _p3_status.success("Background video ready ✓")
+            _p3_status.success("Final video ready ✓")
 
         except Exception as _exc:
             st.error(f"Video generation failed: {_exc}")
@@ -738,11 +747,19 @@ if "p3_video_bytes" in st.session_state:
             use_container_width=True,
         )
     p3_sz_mb = len(st.session_state["p3_video_bytes"]) / 1_048_576
-    st.caption(f"Background video · {p3_sz_mb:.1f} MB · 720p silent .mp4")
+    _has_audio = "p2_audio_bytes" in st.session_state or (
+        "p3_audio_up" in st.session_state and st.session_state.get("p3_audio_up")
+    )
+    _video_desc = "720p"
+    if _has_audio:
+        _video_desc += " · Arabic voice"
+    if st.session_state.get("p3_add_subs", True):
+        _video_desc += " · Arabic subtitles"
+    st.caption(f"Final video · {p3_sz_mb:.1f} MB · {_video_desc}")
     st.download_button(
-        "⬇ Download Background Video (.mp4)",
+        "⬇ Download Final Video (.mp4)",
         data=st.session_state["p3_video_bytes"],
-        file_name="background_video.mp4",
+        file_name="final_video.mp4",
         mime="video/mp4",
         use_container_width=True,
         key="p3_dl",

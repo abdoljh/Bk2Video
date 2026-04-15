@@ -251,6 +251,68 @@ def extract_thumbnail(video_path: Path, output_path: Path, time: float = 2.0) ->
     return output_path
 
 
+# ── Final video muxer ────────────────────────────────────────────────────── #
+
+def mux_final_video(
+    background_video: Path,
+    output_path: Path,
+    audio_path: Path | None = None,
+    subtitle_file: Path | None = None,
+) -> Path:
+    """
+    Combine a silent background video with optional audio and ASS subtitles
+    into a finished MP4.
+
+    The function does everything in a single FFmpeg pass:
+      - Video: re-encoded at crf=22 (better quality than intermediate 26).
+      - Audio: AAC 192 kbps if audio_path is provided; otherwise silent.
+      - Subtitles: burned-in via libass if subtitle_file is provided.
+      - Duration: trimmed to the shorter of video/audio (-shortest flag).
+
+    Parameters
+    ----------
+    background_video   Silent .mp4 produced by assemble_background_video().
+    output_path        Where to write the finished video.
+    audio_path         MP3/AAC audio file (Phase 2 TTS output).  Optional.
+    subtitle_file      ASS subtitle file from subtitler.py.  Optional.
+    """
+    inputs: list[str] = ["-i", str(background_video)]
+    if audio_path and audio_path.exists():
+        inputs += ["-i", str(audio_path)]
+
+    # Build -vf chain: subtitle burn (if requested)
+    vf_parts: list[str] = []
+    if subtitle_file and subtitle_file.exists():
+        # Escape colons and backslashes in path for FFmpeg filtergraph
+        safe_path = str(subtitle_file).replace("\\", "/").replace(":", "\\:")
+        vf_parts.append(f"ass={safe_path}")
+
+    cmd = ["ffmpeg", "-y", *inputs]
+
+    if vf_parts:
+        cmd += ["-vf", ",".join(vf_parts)]
+    else:
+        cmd += ["-c:v", "copy"]   # no re-encode if no subtitle burn needed
+
+    if vf_parts:
+        # Re-encode video for subtitle burn
+        cmd += ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-pix_fmt", "yuv420p"]
+
+    if audio_path and audio_path.exists():
+        cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
+    else:
+        cmd += ["-an"]
+
+    cmd.append(str(output_path))
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"mux_final_video failed:\n{result.stderr[-1200:]}"
+        )
+    return output_path
+
+
 # ── Top-level assembler ──────────────────────────────────────────────────── #
 
 def assemble_background_video(

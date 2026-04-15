@@ -64,26 +64,34 @@ def ken_burns(
     pan_right — slow rightward pan at 1.3× zoom
     pan_left  — slow leftward pan at 1.3× zoom
     """
-    n_frames  = int(duration * fps)
+    n_frames  = max(1, int(duration * fps))
     scale_w   = width  * 2
     scale_h   = height * 2
 
     # ── Zoom / pan expressions ───────────────────────────────────────── #
+    # Zoom step is sized so the total zoom change is always 0.5
+    # (from 1.0 → 1.5 or from 1.5 → 1.0) regardless of clip duration.
+    # This ensures the Ken Burns motion is clearly visible on both
+    # 8-second and 60-second clips.
+    zoom_step = f"{0.5 / n_frames:.6f}"
+    # Pan step: traverse half the scaled frame width over the clip.
+    pan_step  = max(1, int(scale_w * 0.5 / n_frames))
+
     if effect == "zoom_in":
-        z = "min(pzoom+0.0008,1.5)"
+        z = f"min(pzoom+{zoom_step},1.5)"
         x = "iw/2-(iw/zoom/2)"
         y = "ih/2-(ih/zoom/2)"
     elif effect == "zoom_out":
-        z = "if(lte(on,1),1.5,max(1,pzoom-0.0008))"
+        z = f"if(lte(on,1),1.5,max(1,pzoom-{zoom_step}))"
         x = "iw/2-(iw/zoom/2)"
         y = "ih/2-(ih/zoom/2)"
     elif effect == "pan_right":
         z = "1.3"
-        x = "if(lte(on,1),0,min(x+1,iw-iw/zoom))"
+        x = f"if(lte(on,1),0,min(x+{pan_step},iw-iw/zoom))"
         y = "ih/2-(ih/zoom/2)"
     else:  # pan_left
         z = "1.3"
-        x = "if(lte(on,1),iw-iw/zoom,max(0,x-1))"
+        x = f"if(lte(on,1),iw-iw/zoom,max(0,x-{pan_step}))"
         y = "ih/2-(ih/zoom/2)"
 
     vf = (
