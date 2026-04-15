@@ -20,6 +20,13 @@ log = logging.getLogger(__name__)
 _API     = "https://commons.wikimedia.org/w/api.php"
 _HEADERS = {"User-Agent": "Bk2Video/1.0 (https://github.com/abdoljh/Bk2Video; bot)"}
 
+# CirrusSearch exclusions appended to every query to keep out diagrams and
+# anatomical / manuscript illustrations.
+_SEARCH_EXCLUSIONS = "-diagram -anatomy -chart -schematic -manuscript -drawing"
+
+# Minimum acceptable dimension in pixels — rejects postage-stamp thumbnails.
+_MIN_DIMENSION = 400
+
 # License short-names we accept (case-insensitive prefix match)
 _FREE_PREFIXES = ("cc-", "cc0", "pd", "public domain", "attribution")
 # Sub-strings that mark non-free licenses
@@ -77,7 +84,7 @@ def search_images(
         data = _api_get({
             "action":      "query",
             "generator":   "search",
-            "gsrsearch":   f"{query} filetype:bitmap",
+            "gsrsearch":   f"{query} filetype:bitmap {_SEARCH_EXCLUSIONS}",
             "gsrnamespace": "6",                    # File: namespace
             "gsrlimit":    str(min(limit * 3, 30)), # over-fetch, then filter
             "prop":        "imageinfo",
@@ -112,6 +119,12 @@ def search_images(
         lic_val = meta.get("LicenseShortName", {})
         lic     = lic_val.get("value", "") if isinstance(lic_val, dict) else ""
         if not _is_free(lic):
+            continue
+
+        # Skip images that are too small to look good on 720p video
+        orig_w = ii.get("thumbwidth") or ii.get("width", 0)
+        orig_h = ii.get("thumbheight") or ii.get("height", 0)
+        if orig_w < _MIN_DIMENSION or orig_h < _MIN_DIMENSION:
             continue
 
         results.append(WikiImage(
