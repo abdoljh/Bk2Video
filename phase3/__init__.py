@@ -48,6 +48,8 @@ def generate_background_video(
     width: int = 1280,
     height: int = 720,
     images_per_section: int = 3,
+    book_title: str = "",
+    character_name: str = "",
     on_progress: Callable[[str, float], None] | None = None,
 ) -> Path:
     """
@@ -68,6 +70,8 @@ def generate_background_video(
     color_grade          'warm' | 'cool' | 'neutral'.
     width / height       Output resolution (default 1280×720).
     images_per_section   Max Wikimedia images fetched per section (default 3).
+    book_title           Book title passed to keyword generator for context.
+    character_name       Main character / subject name for portrait searches.
     on_progress          Callback(step_label: str, fraction: float).
 
     Returns
@@ -100,7 +104,11 @@ def generate_background_video(
     # ── Step 3: Generate keywords ───────────────────────────────────── #
     _prog("Generating visual keywords…", 0.06)
     if anthropic_api_key:
-        keywords = generate_keywords(sections, genre, anthropic_api_key)
+        keywords = generate_keywords(
+            sections, genre, anthropic_api_key,
+            book_title=book_title,
+            character_name=character_name,
+        )
     else:
         keywords = [_kw_fallback(s, genre) for s in sections]
     kw_map = {kw.section_id: kw for kw in keywords}

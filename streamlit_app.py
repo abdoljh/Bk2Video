@@ -637,6 +637,23 @@ p3_genre = st.selectbox(
     help="Affects Wikimedia search terms and colour-grade default.",
 )
 
+# ── Book context for better image search ─────────────────────────────── #
+_col_title, _col_char = st.columns(2)
+with _col_title:
+    p3_book_title = st.text_input(
+        "Book title (English)",
+        key="p3_book_title",
+        placeholder="e.g. Memoirs of Jafar al-Askari",
+        help="Used by the keyword generator to find more relevant Wikimedia images.",
+    )
+with _col_char:
+    p3_character_name = st.text_input(
+        "Main character name (English)",
+        key="p3_character_name",
+        placeholder="e.g. Jafar al-Askari",
+        help="Ensures a portrait photograph of the main subject is searched first.",
+    )
+
 # ── Generate button ───────────────────────────────────────────────────── #
 if p3_text:
     with st.expander("Preview script sections"):
@@ -691,6 +708,8 @@ if p3_text:
                 genre=p3_genre,
                 color_grade=p3_color_grade,
                 images_per_section=3,
+                book_title=p3_book_title,
+                character_name=p3_character_name,
                 on_progress=_p3_cb,
             )
 

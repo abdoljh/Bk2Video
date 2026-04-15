@@ -22,6 +22,8 @@ _SYSTEM = (
 )
 
 _USER_TMPL = """\
+Book title: {book_title}
+Main character / subject: {character_name}
 Book genre: {genre}
 Section ID: {section_id}
 Section title: {title}
@@ -33,9 +35,14 @@ Generate two keyword lists to find compelling visuals for this section:
 
 Rules:
 - Terms must be in English (Wikimedia and Pexels index in English)
-- For history/biography genres prefer real historical photographs
-- Be specific: "Arab Revolt 1916" beats "revolution"; "Ottoman military uniform" beats "soldier"
-- Pexels terms should be cinematic and general: "desert landscape", "ancient library"
+- For history/biography genres prefer real historical photographs of people and places
+- If a main character is named, the FIRST wikimedia term must be the character's full name
+  (e.g. "Jafar al-Askari" or "Jafar Pasha") to retrieve a portrait photograph
+- Be specific: "Arab Revolt 1916" beats "revolution"; "Jafar al-Askari 1921" beats "Arab officer"
+- NEVER use a single generic word alone — always combine with a person, place, event, or year:
+  BAD: "horse", "army", "soldier"   GOOD: "Arab cavalry 1916", "Ottoman officer uniform WWI"
+- Avoid terms that return anatomical diagrams, manuscript illustrations, or charts
+- Pexels terms should be cinematic: "desert landscape dawn", "Baghdad historical"
 
 Return ONLY this JSON (no other text):
 {{"wikimedia": ["...", "..."], "pexels": ["...", "..."]}}"""
@@ -52,6 +59,8 @@ def generate_keywords(
     sections: list[ScriptSection],
     genre: str,
     anthropic_api_key: str,
+    book_title: str = "",
+    character_name: str = "",
 ) -> list[KeywordSet]:
     """
     Call Claude Haiku once per section to produce per-section keyword sets.
@@ -65,6 +74,8 @@ def generate_keywords(
     for section in sections:
         try:
             prompt = _USER_TMPL.format(
+                book_title=book_title or "unknown",
+                character_name=character_name or "not specified",
                 genre=genre,
                 section_id=section.section_id,
                 title=section.title,
