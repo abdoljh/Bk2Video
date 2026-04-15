@@ -4,4 +4,4 @@ libxrender1
 tesseract-ocr
 tesseract-ocr-ara
 ffmpeg
-fonts-noto-arabic
+fonts-hosny-amiri
