@@ -261,6 +261,7 @@ def mux_final_video(
     output_path: Path,
     audio_path: Path | None = None,
     subtitle_file: Path | None = None,
+    max_duration: float | None = None,
 ) -> Path:
     """
     Combine a silent background video with optional audio and ASS subtitles
@@ -270,7 +271,9 @@ def mux_final_video(
       - Video: re-encoded at crf=22 (better quality than intermediate 26).
       - Audio: AAC 192 kbps if audio_path is provided; otherwise silent.
       - Subtitles: burned-in via libass if subtitle_file is provided.
-      - Duration: trimmed to the shorter of video/audio (-shortest flag).
+      - Duration: hard-capped at max_duration seconds (-t flag) so the
+        output is never longer than the audio, even if the background video
+        was assembled for a slightly longer duration.
 
     Parameters
     ----------
@@ -278,6 +281,8 @@ def mux_final_video(
     output_path        Where to write the finished video.
     audio_path         MP3/AAC audio file (Phase 2 TTS output).  Optional.
     subtitle_file      ASS subtitle file from subtitler.py.  Optional.
+    max_duration       Hard output duration cap in seconds.  Typically the
+                       resolved audio duration.  None = no cap.
     """
     inputs: list[str] = ["-i", str(background_video)]
     if audio_path and audio_path.exists():
@@ -305,6 +310,10 @@ def mux_final_video(
         cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
     else:
         cmd += ["-an"]
+
+    # Hard duration cap: prevents silent tail when background > audio
+    if max_duration and max_duration > 0:
+        cmd += ["-t", f"{max_duration:.3f}"]
 
     cmd.append(str(output_path))
 
