@@ -29,7 +29,7 @@ from .keywords   import generate_keywords, _fallback as _kw_fallback
 from .parser     import ScriptSection, estimate_durations, parse_sections
 from .pexels     import fetch_section_clip
 from .subtitler  import write_ass
-from .wikimedia  import fetch_section_images
+from .wikimedia  import fetch_section_images, score_images
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +142,9 @@ def generate_background_video(
                 log.info("Section %s | key phrases: %s",
                          section.section_id, kw.key_phrases)
 
-            # Wikimedia images (free, no key needed)
+            # Wikimedia images — over-fetch when vision scoring is active
+            # so the scorer has extra candidates to filter from.
+            fetch_max = images_per_section * 2 if anthropic_api_key else images_per_section
             _prog(
                 f"[{i+1}/{n_sections}] Wikimedia search · {section.section_id}"
                 f" | {wiki_q[0] if wiki_q else '?'}…",
@@ -152,15 +154,32 @@ def generate_background_video(
                 queries=wiki_q,
                 dest_dir=sec_dir,
                 n_per_query=2,
-                max_total=images_per_section,
+                max_total=fetch_max,
             )
-            images_map[section.section_id] = imgs
             log.info("Section %s: %d Wikimedia image(s) downloaded",
                      section.section_id, len(imgs))
+
+            # Vision scoring: discard images Claude says are irrelevant
+            if anthropic_api_key and imgs:
+                _prog(
+                    f"[{i+1}/{n_sections}] Checking image relevance · {section.section_id}…",
+                    0.10 + 0.30 * (i + 0.3) / n_sections,
+                )
+                imgs = score_images(
+                    imgs,
+                    book_title=book_title,
+                    character_name=character_name,
+                    api_key=anthropic_api_key,
+                )
+                imgs = imgs[:images_per_section]   # keep at most the target count
+                log.info("Section %s: %d image(s) after vision scoring",
+                         section.section_id, len(imgs))
+
+            images_map[section.section_id] = imgs
             _prog(
                 f"[{i+1}/{n_sections}] {section.section_id}: "
-                f"{len(imgs)} image(s) found",
-                0.10 + 0.30 * (i + 0.4) / n_sections,
+                f"{len(imgs)} relevant image(s)",
+                0.10 + 0.30 * (i + 0.5) / n_sections,
             )
 
             # Pexels video clip: use proactively alongside images if key supplied,

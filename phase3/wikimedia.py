@@ -1,13 +1,24 @@
 """
-Phase 3 — Wikimedia Commons image fetcher.
+Phase 3 — Wikimedia Commons image fetcher + Claude vision relevance scorer.
 
 Uses the MediaWiki API (no API key required) to search for freely
 licensed (CC / Public Domain) photographs relevant to each script
 section. Pre-1928 photographs are public domain worldwide.
+
+Vision scoring (optional, requires Anthropic API key):
+  After downloading, each image is sent to Claude Haiku vision with a
+  binary yes/no relevance question.  Images that answer "no" are
+  discarded before the video is assembled.
+
+  IMPORTANT: images are always resized to ≤800 px wide before being
+  sent to the API.  Oversized images trigger a 400 "Could not process
+  image" error from the Anthropic API.
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import logging
 import urllib.parse
@@ -197,3 +208,98 @@ def fetch_section_images(
         return []
 
     return download_images(collected[:max_total], dest_dir)
+
+
+# ── Claude vision relevance scorer ──────────────────────────────────────── #
+
+def score_images(
+    paths: list[Path],
+    book_title: str,
+    character_name: str,
+    api_key: str,
+) -> list[Path]:
+    """
+    Filter downloaded images with Claude Haiku vision.
+
+    Each image is resized to ≤800 px wide (required — oversized images
+    cause Anthropic API 400 errors), then sent to Claude Haiku with a
+    binary yes/no relevance question.
+
+    Images answered "yes" are kept; "no" images are discarded.
+    On any API/processing failure the image is kept (fail-open policy:
+    prefer showing something over an empty section).
+
+    Returns a filtered list in the same order as `paths`.
+    """
+    if not api_key or not paths:
+        return paths
+
+    try:
+        from anthropic import Anthropic
+        from PIL import Image
+    except ImportError as exc:
+        log.warning("Vision scoring unavailable (%s) — keeping all images", exc)
+        return paths
+
+    client = Anthropic(api_key=api_key)
+
+    if character_name:
+        question = (
+            f'Does this image show "{character_name}" or a scene directly '
+            f'related to the book "{book_title}"? '
+            f'Answer with only the word yes or no.'
+        )
+    else:
+        question = (
+            f'Is this a real historical or documentary photograph relevant '
+            f'to the book "{book_title}"? '
+            f'Answer with only the word yes or no.'
+        )
+
+    kept: list[Path] = []
+
+    for path in paths:
+        try:
+            # ── Resize to ≤800 px wide before sending to API ─────────── #
+            with Image.open(path) as img:
+                img = img.convert("RGB")
+                if img.width > 800:
+                    new_h = int(img.height * 800 / img.width)
+                    img = img.resize((800, new_h), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                img_bytes = buf.getvalue()
+
+            b64 = base64.standard_b64encode(img_bytes).decode()
+
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=5,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": b64,
+                            },
+                        },
+                        {"type": "text", "text": question},
+                    ],
+                }],
+            )
+            answer = msg.content[0].text.strip().lower()
+            if answer.startswith("yes"):
+                kept.append(path)
+                log.info("Vision KEEP   %s", path.name)
+            else:
+                log.info("Vision REJECT %s  (answer: %r)", path.name, answer)
+
+        except Exception as exc:
+            log.warning("Vision scoring failed for %s: %s — keeping it", path.name, exc)
+            kept.append(path)   # fail-open
+
+    log.info("Vision scoring: kept %d / %d  images", len(kept), len(paths))
+    return kept
