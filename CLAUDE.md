@@ -23,6 +23,45 @@ Working repo: **abdoljh/Bk2Video** · Streamlit Community Cloud deployment.
 
 ---
 
+## Repo Structure
+
+```
+streamlit_app.py          # Streamlit entrypoint (Phases 1–3 UI, ~824 lines)
+phase1/
+  __init__.py             # Exports Phase1Pipeline, Phase1Config, Phase1Result
+  pipeline.py             # Phase1Pipeline orchestrator (7-step process)
+  core/
+    ingestor.py           # PDF ingestion (PyMuPDF) — digital + scanned, RTL
+    ocr_engine.py         # Tesseract / EasyOCR / PaddleOCR wrapper
+    normalizer.py         # Arabic text normalisation (lam-alef, Farsi Yeh, noise)
+    chunker.py            # Semantic chunking (~180 lines)
+    diacritizer.py        # Mishkal / Farasa wrapper
+    summarizer.py         # Hierarchical summarisation + script generation
+    output_writer.py      # JSON + TXT serialisation
+phase2/
+  __init__.py
+  tts.py                  # gTTS backend; ElevenLabs stub (implement next)
+phase3/
+  __init__.py             # generate_background_video() full pipeline (~260 lines)
+  parser.py               # Script section splitter + duration estimator (~105 lines)
+  keywords.py             # Claude Haiku: search terms + key phrases per section (~181 lines)
+  wikimedia.py            # Wikimedia Commons image fetcher + Claude vision scoring (~306 lines)
+  pexels.py               # Pexels video clip fetcher (~106 lines)
+  effects.py              # Ken Burns (zoompan) + trim + probe_duration (~163 lines)
+  compositor.py           # Section clips → crossfade → grade → mux (~396 lines)
+  subtitler.py            # Multi-layer ASS subtitle generator (~276 lines)
+packages.txt              # Streamlit Cloud apt deps (ffmpeg, fonts-hosny-amiri, etc.)
+requirements.txt          # Python deps
+output/                   # Phase 1 outputs (JSON + TXT); gitignored in production
+samples/                  # Test PDFs (Al-Askari, preface, sample docs)
+Book1/                    # Al-Askari Memoirs test data
+Audio2/                   # Phase 2 TTS output samples
+Video3/                   # Phase 3 video output samples
+PHASE1_PLAN.md            # Phase 1 detailed design document
+```
+
+---
+
 ## Phase 1 — Text Extraction & Summarisation ✅
 
 ### What it does
@@ -39,6 +78,7 @@ Working repo: **abdoljh/Bk2Video** · Streamlit Community Cloud deployment.
 - **max_tokens = 3500** for Scriptwriter (Arabic ~4.2 tokens/word; 850 words ≈ 3570 tokens).
 - **Diacritisation**: Mishkal applied only to the final script, never to raw OCR text.
 - **No hallucinated names**: Scriptwriter is forbidden from inventing names not in the outline.
+- **Hex-Placeholder Technique**: Used in `ingestor.py` to handle lam-alef ligature extraction from PDF spans without breaking RTL text ordering.
 
 ### Script structure (4 required sections)
 1. Cinematic opening hook
@@ -62,80 +102,84 @@ Working repo: **abdoljh/Bk2Video** · Streamlit Community Cloud deployment.
 - **ElevenLabs** integration (Chaouki voice) for broadcast-quality Arabic TTS.
   - Stub already exists in `phase2/tts.py` (`NotImplementedError`).
   - Needs: `ELEVENLABS_API_KEY` secret + voice ID in UI, then call ElevenLabs REST API.
-  - Priority: implement after Phase 3 visual quality is acceptable.
+  - Priority: implement after Phase 3 visual quality is stable.
 
 ---
 
 ## Phase 3 — Visual Generation 🔧 (IN PROGRESS — THE CORNERSTONE)
 
-### What works today
-- Script parsed into sections (opening, point_1–3, closing, cta)
-- Claude Haiku generates Wikimedia + Pexels search terms **and key phrases** per section, using book title + character name as context
-- Wikimedia Commons images downloaded (free, no key), with exclusions for diagrams/anatomy and a 400 px minimum size filter
-- Pexels video clips as fallback (key optional)
-- Ken Burns effect (zoom/pan) applied to each image — zoom speed proportional to clip length so motion is always visible
-- Crossfade transitions between sections
-- Warm/cool/neutral colour grade
-- **Multi-layer ASS Arabic subtitles** (Amiri font) burned into video:
-  - `TitleCard` — book title full-screen at t=0 (5 seconds)
-  - `SectionMark` — chapter heading at start of each section (2.5 seconds)
-  - `KeyPhrase` — most impactful Arabic sentence from each section, displayed large and centred
-  - `Arabic` — regular caption flow for the full script text
-- Phase 2 TTS audio muxed into final MP4
-- Output: complete 720p MP4
-- Styled dark-navy fallback background when no images are found
+### What works today (Tier 1 — all implemented ✅)
+
+| Feature | Implementation |
+|---------|---------------|
+| Section parsing | Regex-based Arabic section detection (`parser.py`) |
+| Keyword + key phrase generation | Claude Haiku per section; book title + character name as context (`keywords.py`) |
+| Wikimedia image search | Free CC/PD images, license-filtered, 400 px minimum, excludes diagrams/anatomy (`wikimedia.py`) |
+| **Claude vision image scoring** | Resize to ≤800 px → Haiku vision binary yes/no; discard "no" images (`wikimedia.py`) |
+| Pexels clip fallback | Optional (key is optional); proactively downloaded when key supplied (`pexels.py`) |
+| Ken Burns effect | Zoom span always 0.5 (1.0→1.5) regardless of clip length; cycles zoom_in/out/pan_right/left (`effects.py`) |
+| Crossfade assembly | FFmpeg xfade filter, 1-second fades, all sections connected (`compositor.py`) |
+| Colour grading | Warm/cool/neutral preset curves (`compositor.py`) |
+| Title card | ASS `TitleCard` style, full-screen centred, t=0→5 s (`subtitler.py`) |
+| Section markers | ASS `SectionMark` style at each section boundary, 2.5 s (`subtitler.py`) |
+| Key phrase overlays | Claude Haiku extracts 1-2 per section; ASS `KeyPhrase` style, centred (`subtitler.py`) |
+| Regular captions | ASS `Arabic` style, bottom of screen, full script coverage (`subtitler.py`) |
+| Audio mux | Single FFmpeg pass: video re-encode (crf=22) + AAC (192 kbps) + subtitle burn (`compositor.py`) |
+| Dark fallback background | Navy `#1a1a2e` when no images found (cinematic, not black) (`compositor.py`) |
+| Thumbnail extraction | Frame at t=5 for Streamlit UI preview (`compositor.py`) |
+| Output | 720p MP4, hard duration-capped to audio length |
+
+### Key implementation notes
+
+**Vision scoring** (`wikimedia.py → score_images()`):
+- Called after `download_images()`, before assembly
+- Over-fetches images (2× `images_per_section`) when vision scoring is active
+- Each image resized to `img.thumbnail((800, 800))` before base64 encoding
+- Prompt: "Does this image show [character_name] or a scene directly related to [book_title]? Answer only yes or no."
+- **Fail-open**: any API error → keep the image (prefer something over empty screen)
+- Cost: ~$0.001 per image (Haiku vision pricing)
+
+**ASS subtitles** (`subtitler.py`):
+- All layers use libass (correct Arabic bidi); **never** use FFmpeg `drawtext` (no Arabic shaping)
+- Font family in ASS must be `Amiri` (matches `fonts-hosny-amiri` Debian package)
+- 4 concurrent tracks: TitleCard → SectionMark → KeyPhrase → Arabic captions
+
+**Section timing** (`parser.py`):
+- Sections: `opening`, `point_1`, `point_2`, `point_3`, `closing`, `cta`
+- Duration estimated from word count × speaking rate (Arabic ~130 words/min)
+- `cta` section always gets minimum 15 s to allow book presentation to land
 
 ### Current weaknesses (what still needs work)
 
-#### 1. Image accuracy
-Wikimedia returns topically adjacent but not precisely relevant images.
-A search for "Jafar al-Askari" may return anything from the right era but not
-the right person. The `-diagram -anatomy` exclusions help but do not guarantee
-subject specificity.
+**Image accuracy** (partially mitigated by vision scoring):
+- Wikimedia text search matches file names/descriptions, not image content
+- Vision scoring filters irrelevant images but upstream search quality is still the bottleneck
+- Next improvement: better search query construction (more specific Arabic transliterations)
 
-**Root cause**: Wikimedia text search has no visual understanding — it matches
-file names and descriptions, not image content.
+**Visual narrative quality**:
+- Ken Burns + images + subtitles is functional but not yet cinematic
+- No typography fallback cards when images are absent (still shows navy background)
 
-**Next step (Tier 2)**: Claude vision scoring — after downloading each image,
-send it (resized to ≤ 800 px wide) to Claude Haiku vision with a binary
-yes/no relevance question. Discard "no" images before assembly.
-**IMPORTANT**: Always resize to ≤ 800 px before sending to Claude vision.
-Oversized images cause `400 "Could not process image"` API errors.
+### Phase 3 Tiered Roadmap
 
-#### 2. Visual narrative quality
-Ken Burns + images + subtitles is functional but not yet cinematic.
-The Tier 2 and Tier 3 items below address this progressively.
+#### Tier 1 — Complete ✅
+All features in the table above, including vision scoring (merged in commit `de5e3fd`).
 
-### Phase 3 Visual Strategy — Tiered Roadmap
-
-#### Tier 1 — Implemented ✅
-| Feature | Implementation |
-|---------|---------------|
-| Title card (book title + author) | ASS `TitleCard` style, t=0 to t=5 |
-| Section markers | ASS `SectionMark` style at each section boundary |
-| Key phrase overlays | Claude Haiku extracts 1-2 per section; ASS `KeyPhrase` style, centred |
-| Regular captions | ASS `Arabic` style, bottom of screen |
-| Ken Burns zoom fix | Zoom step = 0.5/n_frames (always spans 1.0→1.5 regardless of clip length) |
-| Dark fallback background | Navy (#1a1a2e) instead of black |
-| Wikimedia exclusions | `-diagram -anatomy -chart -schematic` in every search query |
-| Min image size | 400 px minimum dimension filter |
-
-#### Tier 2 — Next session priority
-1. **Claude vision image scoring** (closes the accuracy gap):
-   - After `download_images()`, call `score_images(images, character_name, book_title)`
-   - Resize each to ≤ 800 px wide (PIL thumbnail) before sending to Claude Haiku vision
-   - Discard images where Claude says "no"
-   - Cost: ~$0.001 per image (Haiku vision pricing)
-
-2. **ElevenLabs TTS** (biggest single quality jump):
-   - Implement the stub in `phase2/tts.py`
-   - Chaouki voice (or similar high-quality Arabic voice)
+#### Tier 2 — Next session priorities
+1. **ElevenLabs TTS** (biggest single quality jump):
+   - File: `phase2/tts.py` — fill in `NotImplementedError` stub
+   - Add `ELEVENLABS_API_KEY` to Streamlit Cloud secrets
+   - Target: Chaouki voice or equivalent high-quality Arabic voice
    - The voice quality transforms the perceived quality of the entire video
 
-3. **Pillow text cards** (for sections with no usable images):
+2. **Pillow text cards** (for sections with no usable images after vision scoring):
    - Render a styled typography card: gradient background + key phrase in Amiri
    - Use `arabic_reshaper` + `python-bidi` for correct RTL shaping in Pillow
-   - This replaces the navy fallback with something visually informative
+   - Replaces navy fallback with something visually informative
+
+3. **Search query quality** (improves vision scoring hit rate):
+   - Add Arabic transliteration of character name to Wikimedia queries
+   - Add date/century context to historical searches
 
 #### Tier 3 — Future
 - Animated word-by-word text reveal
@@ -144,91 +188,41 @@ The Tier 2 and Tier 3 items below address this progressively.
 - Multiple visual themes (documentary, cinematic, minimal)
 - AI-generated images (DALL-E / Stable Diffusion) for scenes with no stock equivalent
 
-### Phase 3 File Map
-
-```
-phase3/
-  __init__.py      — generate_background_video() full pipeline orchestrator
-  parser.py        — split script into sections; estimate per-section durations
-  keywords.py      — Claude Haiku: Wikimedia/Pexels search terms + key phrases
-  wikimedia.py     — MediaWiki API: search free images, filter, download
-  pexels.py        — Pexels Video API: fallback clips
-  effects.py       — Ken Burns (zoompan); trim_clip; probe_duration
-  compositor.py    — section clips → crossfade → colour grade → mux_final_video
-  subtitler.py     — ASS generator: TitleCard/SectionMark/KeyPhrase/captions
-```
-
 ---
 
 ## Phase 4 — Workflow Integration ✅
 
 The Streamlit UI chains all phases in one session:
 
-1. **Phase 1** tab: Upload PDF → Run → Download script files
-2. **Phase 2** tab: Choose script → Generate Audio → Download MP3
-3. **Phase 3** tab: Enter book title + character name → Generate Final Video → Download MP4
+1. **Phase 1** tab: Upload PDF → Configure (OCR backend, chunking params, API keys) → Run → Download outputs
+2. **Phase 2** tab: Choose script source (Phase 1 session or upload `.txt`) → Choose variant (plain/diacritized) → Generate audio → Download MP3
+3. **Phase 3** tab: Enter book title + character name → (optional) keyword preview → Generate Final Video → Download MP4
 
-Each phase's output automatically feeds the next within the same session.
+Each phase's output automatically feeds the next within the same session via Streamlit `st.session_state`. Progress callbacks stream to the UI in real-time.
+
 Phase 4 is considered complete once Phase 3 produces broadcast-quality output.
 
 ---
 
 ## Immediate Next Steps (start here next session)
 
-1. **Verify current build** on Streamlit Cloud — confirm `fonts-hosny-amiri` installs
-   and the multi-layer ASS subtitle pipeline (TitleCard + SectionMark + KeyPhrase)
-   renders correctly in the downloaded video.
+1. **Verify vision scoring on Streamlit Cloud** — confirm `de5e3fd` is live:
+   - Check that `fonts-hosny-amiri` installs successfully (packages.txt)
+   - Run end-to-end with al-Askari Memoirs and inspect downloaded video
+   - Confirm TitleCard, SectionMark, KeyPhrase, and Arabic caption layers all render
 
-2. **Implement Claude vision image scoring** (Tier 2, highest ROI):
-   - File to edit: `phase3/wikimedia.py`
-   - Add `score_images(paths, character_name, book_title, api_key)` function
-   - Resize each image: `img.thumbnail((800, 800))` before encoding to base64
-   - Call `anthropic.messages.create` with `image` content block
-   - Prompt: "Does this image show [character_name] or a scene directly related
-     to [book_title]? Answer only yes or no."
-   - Return only the "yes" images
-
-3. **Implement ElevenLabs TTS** (Tier 2):
+2. **Implement ElevenLabs TTS** (Tier 2, highest quality impact):
    - File to edit: `phase2/tts.py`
    - Fill in the `NotImplementedError` stub
    - Add `ELEVENLABS_API_KEY` to Streamlit Cloud secrets
-   - Test with Chaouki voice
+   - Test with Chaouki voice or equivalent Arabic voice
 
-4. **End-to-end validation** on al-Askari Memoirs, both PDF parts,
-   and upload sample to `Video4/` in the repo.
+3. **Implement Pillow typography cards** (Tier 2):
+   - For sections where vision scoring leaves zero images
+   - Use `arabic_reshaper` + `python-bidi` for RTL text rendering in Pillow
+   - Gradient background + Amiri font + key phrase text
 
----
-
-## Repo Structure
-
-```
-streamlit_app.py          # Streamlit entrypoint (Phases 1–3 UI)
-phase1/
-  __init__.py
-  pipeline.py             # Phase1Pipeline orchestrator
-  core/
-    ingestor.py           # PDF ingestion (PyMuPDF) — digital + scanned
-    ocr_engine.py         # Tesseract / EasyOCR / PaddleOCR wrapper
-    normalizer.py         # Arabic text normalisation
-    chunker.py            # Semantic chunking
-    output_writer.py      # Writes JSON / TXT outputs
-    summarizer.py         # Hierarchical summarisation + script generation
-phase2/
-  __init__.py
-  tts.py                  # gTTS backend; ElevenLabs stub (implement next)
-phase3/
-  __init__.py             # generate_background_video() full pipeline
-  parser.py               # Script section splitter + duration estimator
-  keywords.py             # Claude Haiku: search terms + key phrases per section
-  wikimedia.py            # Wikimedia Commons image fetcher + filter
-  pexels.py               # Pexels video clip fetcher
-  effects.py              # Ken Burns (zoompan) + trim + probe_duration
-  compositor.py           # Section clips → crossfade → grade → mux
-  subtitler.py            # Multi-layer ASS subtitle generator
-packages.txt              # Streamlit Cloud apt deps (ffmpeg, fonts-hosny-amiri, etc.)
-requirements.txt          # Python deps
-PHASE1_PLAN.md            # Phase 1 detailed design document
-```
+4. **End-to-end validation** on al-Askari Memoirs (both PDF parts) and upload sample MP4 to `Video4/` in the repo.
 
 ---
 
@@ -238,11 +232,13 @@ PHASE1_PLAN.md            # Phase 1 detailed design document
 |-----------|--------|
 | Streamlit Cloud RAM | 1 GB — no PyTorch; Tesseract OCR only |
 | No GPU | All ML inference via API; local tools CPU-only |
-| Arabic RTL in video | Use ASS + libass (correct bidi); never FFmpeg `drawtext` (no Arabic bidi) |
-| Claude vision image size | Always resize to ≤ 800 px wide before sending — oversized → `400 Could not process image` |
-| Streamlit Cloud Python | 3.14 — PaddleOCR needs ≤ 3.12, do not use it |
-| Arabic font for FFmpeg | `fonts-hosny-amiri` (Debian trixie) → font family name `Amiri` |
+| Arabic RTL in video | Use ASS + libass (correct bidi); **never** FFmpeg `drawtext` (no Arabic bidi support) |
+| Claude vision image size | **Always resize to ≤ 800 px wide** before sending — oversized → `400 Could not process image` |
+| Streamlit Cloud Python | 3.14 — PaddleOCR needs ≤ 3.12; do not use PaddleOCR |
+| Arabic font for FFmpeg | `fonts-hosny-amiri` (Debian trixie) → font family name `Amiri` in ASS files |
 | Do NOT use | `fonts-noto-arabic` — does not exist in Debian trixie repos |
+| Pexels key | Optional — app must work without it; wrap all Pexels code in key-presence checks |
+| Anthropic API key | Required for Phase 1 summarisation and Phase 3 keyword/vision scoring |
 
 ---
 
@@ -250,12 +246,46 @@ PHASE1_PLAN.md            # Phase 1 detailed design document
 
 | Task | Model | Cost per book |
 |------|-------|---------------|
-| Reader per chunk | claude-haiku-4-5 | ~$0.01 |
-| Consolidator | claude-haiku-4-5 | ~$0.001 |
-| Scriptwriter | claude-sonnet-4-6 | ~$0.04 |
-| Editor/Scorer | claude-haiku-4-5 | ~$0.002 |
-| Keyword + key phrase gen (Phase 3) | claude-haiku-4-5-20251001 | ~$0.003 |
-| Image relevance scoring (next) | claude-haiku-4-5-20251001 vision | ~$0.005 |
-| **Total (current)** | | **~$0.05** |
+| Reader per chunk | `claude-haiku-4-5-20251001` | ~$0.01 |
+| Consolidator | `claude-haiku-4-5-20251001` | ~$0.001 |
+| Scriptwriter | `claude-sonnet-4-6` | ~$0.04 |
+| Editor/Scorer | `claude-haiku-4-5-20251001` | ~$0.002 |
+| Keyword + key phrase gen (Phase 3) | `claude-haiku-4-5-20251001` | ~$0.003 |
+| Image relevance vision scoring | `claude-haiku-4-5-20251001` vision | ~$0.005 |
+| **Total (current, gTTS)** | | **~$0.06** |
 | TTS (gTTS) | Free | $0 |
 | TTS (ElevenLabs target) | Chaouki voice | ~$0.10–0.30 |
+
+**Rule**: Use Haiku for every bulk, scoring, or classification task. Reserve Sonnet/Opus only for creative output (the final script).
+
+---
+
+## Development Conventions
+
+### Arabic text handling
+- Never apply diacritization to raw OCR output — only to the final approved script
+- Always use `arabic_reshaper` + `python-bidi` when rendering Arabic in Pillow/matplotlib
+- In ASS subtitles, set `ScaledBorderAndShadow: yes` and `WrapStyle: 0` for correct RTL wrapping
+- Use MSA Arabic only in generated scripts; reject dialect substitutions
+
+### FFmpeg subprocess calls
+- All FFmpeg calls go through `subprocess.run([...], check=True)` — never `os.system()`
+- Build filter graphs as Python list → `','.join(filters)` to avoid shell injection
+- `probe_duration()` in `effects.py` uses `ffprobe -v quiet -print_format json -show_streams`
+- Ken Burns via `zoompan` filter; scale image to 2× output resolution first to avoid upscaling artifacts
+
+### Streamlit patterns
+- Phase outputs stored in `st.session_state` keyed by phase number: `st.session_state['phase1_result']`, `st.session_state['phase3_video_path']`, etc.
+- Progress callbacks: pass a `progress_callback(message: str)` function from UI into pipeline functions
+- All file paths in session state are absolute paths to temp files; clean up on session end
+
+### Git workflow
+- Active development branch: `claude/add-claude-documentation-08SqJ`
+- Commit message format: `Phase N: <what changed>` (e.g., `Phase 3: Claude vision scoring — discard irrelevant Wikimedia images`)
+- Push to `origin claude/add-claude-documentation-08SqJ` after each logical unit of work
+
+### Secrets / environment
+- `ANTHROPIC_API_KEY` — required for Phases 1 and 3
+- `PEXELS_API_KEY` — optional; app works without it (Wikimedia + vision scoring only)
+- `ELEVENLABS_API_KEY` — not yet used; stub ready in `phase2/tts.py`
+- Access in code: `st.secrets["KEY_NAME"]` on Cloud; `.env` file locally (never commit)
