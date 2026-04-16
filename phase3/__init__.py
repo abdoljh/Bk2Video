@@ -133,9 +133,21 @@ def generate_background_video(
             sec_dir   = assets_dir / section.section_id
             sec_dir.mkdir()
 
+            # Log the actual search terms so the user can see what's happening
+            log.info("Section %s | wikimedia queries: %s",
+                     section.section_id, wiki_q)
+            log.info("Section %s | pexels queries: %s",
+                     section.section_id, pexels_q)
+            if kw and kw.key_phrases:
+                log.info("Section %s | key phrases: %s",
+                         section.section_id, kw.key_phrases)
+
             # Wikimedia images (free, no key needed)
-            _prog(f"Fetching images · {section.section_id}…",
-                  0.10 + 0.30 * i / n_sections)
+            _prog(
+                f"[{i+1}/{n_sections}] Wikimedia search · {section.section_id}"
+                f" | {wiki_q[0] if wiki_q else '?'}…",
+                0.10 + 0.30 * i / n_sections,
+            )
             imgs = fetch_section_images(
                 queries=wiki_q,
                 dest_dir=sec_dir,
@@ -143,19 +155,29 @@ def generate_background_video(
                 max_total=images_per_section,
             )
             images_map[section.section_id] = imgs
-            log.info("Section %s: %d Wikimedia image(s)", section.section_id, len(imgs))
+            log.info("Section %s: %d Wikimedia image(s) downloaded",
+                     section.section_id, len(imgs))
+            _prog(
+                f"[{i+1}/{n_sections}] {section.section_id}: "
+                f"{len(imgs)} image(s) found",
+                0.10 + 0.30 * (i + 0.4) / n_sections,
+            )
 
-            # Pexels video clip (fallback, key optional)
+            # Pexels video clip: use proactively alongside images if key supplied,
+            # not only as a last-resort fallback.
             clip: Path | None = None
-            if pexels_api_key and not imgs:
-                _prog(f"Fetching Pexels clip · {section.section_id}…",
-                      0.10 + 0.30 * (i + 0.5) / n_sections)
+            if pexels_api_key:
+                _prog(f"[{i+1}/{n_sections}] Pexels clip · {section.section_id}…",
+                      0.10 + 0.30 * (i + 0.7) / n_sections)
                 clip_dest = assets_dir / f"pexels_{section.section_id}.mp4"
                 clip = fetch_section_clip(
                     queries=pexels_q,
                     api_key=pexels_api_key,
                     dest=clip_dest,
                 )
+                if clip:
+                    log.info("Section %s: Pexels clip downloaded → %s",
+                             section.section_id, clip.name)
             clips_map[section.section_id] = clip
 
         # ── Step 6: Assemble background video ────────────────────────── #
