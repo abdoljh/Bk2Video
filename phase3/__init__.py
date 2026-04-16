@@ -226,12 +226,16 @@ def generate_background_video(
             log.info("Audio written to temp file: %s", audio_tmp)
 
         # ── Step 9: Mux background + audio + subtitles ────────────────── #
+        # Pass the resolved audio duration so the muxer can hard-trim the
+        # output to exactly that length, preventing a silent tail when the
+        # background video is longer than the audio.
         _prog("Muxing audio and subtitles into final video…", 0.88)
         mux_final_video(
             background_video=bg_path,
             output_path=output_path,
             audio_path=audio_tmp,
             subtitle_file=ass_path,
+            max_duration=audio_duration_sec,
         )
 
     _prog("Final video complete ✓", 1.0)
@@ -245,8 +249,13 @@ def _resolve_duration(audio_bytes: bytes | None, script_text: str) -> float:
     Determine total audio duration.
 
     Priority:
-    1. ffprobe on audio_bytes (most accurate)
-    2. Character-count estimate (~30 Arabic chars per second)
+    1. ffprobe on audio_bytes (most accurate — always used when audio is present)
+    2. Character-count estimate for Arabic TTS (~12 chars/sec, max 360 s)
+
+    Arabic TTS rate: gTTS reads Arabic at roughly 120 words/min ≈ 2 words/sec,
+    average 6 chars/word including diacritics ≈ 12 chars/sec.
+    The hard cap of 360 s (6 min) prevents run-away estimates from over-long
+    script files.
     """
     if audio_bytes:
         try:
@@ -264,8 +273,9 @@ def _resolve_duration(audio_bytes: bytes | None, script_text: str) -> float:
         except Exception as exc:
             log.warning("ffprobe duration failed: %s", exc)
 
-    # Fallback: character-count estimate
+    # Fallback: character-count estimate for Arabic TTS
+    # ~12 chars/sec accounts for gTTS Arabic reading speed; cap at 6 min.
     n_chars = len(script_text.strip())
-    est     = max(60.0, n_chars / 30.0)
+    est     = min(360.0, max(60.0, n_chars / 12.0))
     log.info("Estimated audio duration from chars (%d): %.1f s", n_chars, est)
     return est

@@ -6,8 +6,8 @@ by FFmpeg's libass (which handles Arabic RTL / bidi correctly):
 
   TitleCard   — book title + author, full-screen centred, first 5 seconds
   SectionMark — Arabic section heading, top-centre at each section boundary
-  KeyPhrase   — most impactful sentence from each section, large centred text
-  Arabic      — regular caption flow, small text at screen bottom
+  KeyPhrase   — most impactful sentence from each section, large text at screen bottom
+  Arabic      — regular caption flow, readable text at screen bottom
 
 Why ASS over SRT or FFmpeg drawtext:
   - libass has full Unicode bidi support → Arabic displays RTL correctly
@@ -28,7 +28,7 @@ from .parser import ScriptSection
 # ── Timing constants ─────────────────────────────────────────────────────── #
 TITLE_SEC       = 5.0    # book title card duration at t=0
 SECTION_MARK_SEC = 2.5   # section header card duration
-KEY_PHRASE_SEC  = 5.0    # each key-phrase overlay duration
+KEY_PHRASE_SEC  = 3.5    # each key-phrase overlay duration (shortened to leave time for captions)
 MIN_CAPTION_SEC = 2.0    # minimum duration for a regular caption block
 CAPTION_GAP_SEC = 0.08   # tiny gap between consecutive caption blocks
 
@@ -65,8 +65,8 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: TitleCard,Amiri,{title_sz},&H00FFFFFF,&H000000FF,&H00000000,&HC0000000,1,0,0,0,100,100,0,0,3,0,0,5,60,60,60,1
 Style: TitleSub,Amiri,{titlesub_sz},&H00C9A84C,&H000000FF,&H00000000,&HC0000000,0,1,0,0,100,100,0,0,3,0,0,5,60,60,{titlesub_v},1
 Style: SectionMark,Amiri,{section_sz},&H00C9A84C,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,0,0,8,40,40,40,1
-Style: KeyPhrase,Amiri,{keyphrase_sz},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,3,0,0,5,80,80,{keyphrase_v},1
-Style: Arabic,Amiri,{caption_sz},&H00FFFFFF,&H000000FF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,1,3,1,2,40,40,50,1
+Style: KeyPhrase,Amiri,{keyphrase_sz},&H00FFFACD,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,3,3,1,2,60,60,{keyphrase_v},1
+Style: Arabic,Amiri,{caption_sz},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,1,2,40,40,{caption_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -162,22 +162,25 @@ def generate_ass(
         key_phrases_map = {}
 
     # ── Compute font sizes proportional to resolution ─────────────────── #
-    title_sz    = max(60, height // 10)
-    titlesub_sz = max(36, height // 18)
-    section_sz  = max(44, height // 14)
-    keyphrase_sz = max(40, height // 16)
-    caption_sz  = max(32, height // 20)
-    titlesub_v  = title_sz + titlesub_sz + 20   # vertical margin below title
+    # Sizes are chosen for comfortable readability on a 720p screen.
+    title_sz     = max(72,  height // 9)     # big title card at t=0
+    titlesub_sz  = max(44,  height // 16)    # author subtitle line
+    section_sz   = max(52,  height // 13)    # section heading at top
+    keyphrase_sz = max(62,  height // 11)    # key phrase — large, at bottom
+    caption_sz   = max(48,  height // 14)    # regular captions — clearly readable
 
-    # KeyPhrase vertical margin: slightly above centre
-    keyphrase_v = max(40, height // 5)
+    titlesub_v   = title_sz + titlesub_sz + 20  # TitleSub drops below TitleCard centre
+
+    # KeyPhrase sits higher at the bottom than regular captions so they are distinct.
+    keyphrase_v  = max(80,  height // 7)         # px from screen bottom (alignment 2)
+    caption_v    = max(40,  height // 18)        # px from screen bottom for captions
 
     header = _ASS_HEADER.format(
         width=width, height=height,
         title_sz=title_sz, titlesub_sz=titlesub_sz, titlesub_v=titlesub_v,
         section_sz=section_sz,
         keyphrase_sz=keyphrase_sz, keyphrase_v=keyphrase_v,
-        caption_sz=caption_sz,
+        caption_sz=caption_sz, caption_v=caption_v,
     )
 
     events: list[str] = []
