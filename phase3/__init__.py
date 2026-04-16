@@ -181,7 +181,19 @@ def generate_background_video(
         if add_subtitles and script_text.strip():
             _prog("Generating Arabic subtitles…", 0.84)
             ass_path = assets_dir / "subtitles.ass"
-            write_ass(sections, durations, ass_path, width=width, height=height)
+            key_phrases_map = {
+                kw.section_id: kw.key_phrases
+                for kw in keywords
+                if kw.key_phrases
+            } if anthropic_api_key else {}
+            write_ass(
+                sections, durations, ass_path,
+                book_title=book_title,
+                author_name=character_name,
+                key_phrases_map=key_phrases_map,
+                width=width,
+                height=height,
+            )
             log.info("ASS subtitle file written: %s", ass_path)
 
         # ── Step 8: Save audio bytes to temp file ─────────────────────── #

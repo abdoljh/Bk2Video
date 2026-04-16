@@ -130,11 +130,14 @@ def _concat_copy(clips: list[Path], output: Path) -> None:
 
 
 def _black_clip(output: Path, duration: float, width: int, height: int) -> None:
-    """Generate a silent black video clip (last-resort fallback)."""
+    """
+    Generate a silent dark-navy video clip (last-resort fallback).
+    Dark navy (#1a1a2e) looks cinematic and lets white ASS text stand out clearly.
+    """
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi",
-        "-i", f"color=c=black:s={width}x{height}:r=25",
+        "-i", f"color=c=0x1a1a2e:s={width}x{height}:r=25",
         "-t", str(duration),
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-preset", "ultrafast",
