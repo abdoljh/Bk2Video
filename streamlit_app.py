@@ -672,6 +672,63 @@ if p3_text:
         except Exception:
             st.text(p3_text[:600])
 
+    # ── Keyword preview (optional step before generating video) ──────── #
+    with st.expander("🔍 Preview search keywords (optional — inspect before generating)"):
+        st.caption(
+            "Click **Generate Keywords** to see exactly what search terms Claude will "
+            "use for Wikimedia and Pexels, and which Arabic key phrases will be "
+            "displayed as on-screen text overlays — before committing to the full video."
+        )
+        if st.button("Generate Keywords", key="p3_kw_preview"):
+            if not anthropic_key:
+                st.warning("Anthropic API key required for keyword generation. "
+                           "Add it in the sidebar.")
+            else:
+                with st.spinner("Calling Claude Haiku for keyword ideas…"):
+                    try:
+                        from phase3.parser import parse_sections as _parse
+                        from phase3.keywords import generate_keywords as _gen_kw
+
+                        _kw_sections = _parse(p3_text)
+                        _kw_results  = _gen_kw(
+                            _kw_sections,
+                            p3_genre,
+                            anthropic_key,
+                            book_title=p3_book_title,
+                            character_name=p3_character_name,
+                        )
+                        st.session_state["p3_kw_results"] = _kw_results
+                    except Exception as _e:
+                        st.error(f"Keyword generation failed: {_e}")
+
+        if "p3_kw_results" in st.session_state:
+            for _kw in st.session_state["p3_kw_results"]:
+                st.markdown(
+                    f"<div style='font-family:DM Mono,monospace;font-size:0.7rem;"
+                    f"color:#c9a84c;margin-top:0.8rem;text-transform:uppercase'>"
+                    f"{_kw.section_id}</div>",
+                    unsafe_allow_html=True,
+                )
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    st.markdown("**Wikimedia searches**")
+                    for _q in _kw.wikimedia:
+                        st.markdown(f"- `{_q}`")
+                with _c2:
+                    st.markdown("**Pexels searches**")
+                    for _q in _kw.pexels:
+                        st.markdown(f"- `{_q}`")
+                if _kw.key_phrases:
+                    st.markdown("**Key phrase overlays**")
+                    for _phrase in _kw.key_phrases:
+                        st.markdown(
+                            f"<div style='direction:rtl;text-align:right;"
+                            f"background:#fefcf8;border-left:3px solid #c9a84c;"
+                            f"padding:0.4rem 0.8rem;margin:0.3rem 0;"
+                            f"font-size:0.9rem'>{_phrase}</div>",
+                            unsafe_allow_html=True,
+                        )
+
     p3_add_subs = st.checkbox(
         "Burn Arabic subtitles into video",
         value=True,

@@ -21,8 +21,9 @@ _API     = "https://commons.wikimedia.org/w/api.php"
 _HEADERS = {"User-Agent": "Bk2Video/1.0 (https://github.com/abdoljh/Bk2Video; bot)"}
 
 # CirrusSearch exclusions appended to every query to keep out diagrams and
-# anatomical / manuscript illustrations.
-_SEARCH_EXCLUSIONS = "-diagram -anatomy -chart -schematic -manuscript -drawing"
+# anatomical illustrations.  Do NOT exclude -manuscript or -drawing — those
+# terms also block legitimate historical photographs.
+_SEARCH_EXCLUSIONS = "-diagram -anatomy -chart -schematic"
 
 # Minimum acceptable dimension in pixels — rejects postage-stamp thumbnails.
 _MIN_DIMENSION = 400
