@@ -74,20 +74,33 @@ class SemanticChunker:
         Accept a list of RawPage objects and return a flat list of Chunks.
         """
         # 1. Merge all pages into a single stream, tracking page boundaries
-        full_text, page_map = self._merge_pages(pages)
+        non_empty = [p for p in pages if p.raw_text.strip()]
+        if not non_empty:
+            logger.warning("chunk_pages: all %d pages are empty — returning no chunks.", len(pages))
+            return []
+        if len(non_empty) < len(pages):
+            logger.info("chunk_pages: %d/%d pages non-empty (skipping empty pages).",
+                        len(non_empty), len(pages))
+        full_text, page_map = self._merge_pages(non_empty)
+        logger.debug("chunk_pages: merged text length = %d chars.", len(full_text))
 
         # 2. Split on chapter headings first
         sections = self._split_by_chapters(full_text)
+        logger.debug("chunk_pages: detected %d section(s).", len(sections))
 
         chunks: list[Chunk] = []
         chunk_id = 0
+        skipped_stubs = 0
 
         for chapter_title, section_text in sections:
             # 3. Split each section into token-safe pieces
             pieces = self._split_to_token_limit(section_text)
             for piece in pieces:
                 if len(piece.split()) < self.min_chunk_words:
-                    continue   # skip stubs
+                    skipped_stubs += 1
+                    logger.debug("Skipping stub (%d words) in section '%s': %r",
+                                 len(piece.split()), chapter_title, piece[:60])
+                    continue
                 page_s, page_e = self._estimate_pages(piece, page_map)
                 chunks.append(Chunk(
                     chunk_id   = chunk_id,
@@ -99,9 +112,15 @@ class SemanticChunker:
                 chunk_id += 1
 
         logger.info(
-            "Chunked into %d pieces (max_tokens=%d, overlap=%d).",
-            len(chunks), self.max_tokens, self.overlap_tokens,
+            "Chunked into %d pieces (max_tokens=%d, overlap=%d, stubs_skipped=%d).",
+            len(chunks), self.max_tokens, self.overlap_tokens, skipped_stubs,
         )
+        if len(chunks) == 0:
+            logger.warning(
+                "chunk_pages produced 0 chunks from %d pages (%d chars). "
+                "min_chunk_words=%d. Check normalisation output.",
+                len(non_empty), len(full_text), self.min_chunk_words,
+            )
         return chunks
 
     # ------------------------------------------------------------------ #
@@ -131,7 +150,7 @@ class SemanticChunker:
         Falls back to [("full_book", text)] if no headings detected.
         """
         matches = list(_HEADING_PATTERN.finditer(text))
-        if len(matches) < 2:
+        if not matches:
             return [("full_book", text)]
 
         sections = []
