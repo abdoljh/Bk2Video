@@ -103,13 +103,6 @@ def _fix_decomposed_arabic(text: str) -> str:
     Safe to call on both digital and scanned paths — a no-op when the special
     code points are absent.
     """
-    # Remove spurious spaces between Arabic text and symbol-dot/dotless-base
-    # sequences that some PDF fonts insert between decomposed letter pairs.
-    # Must run BEFORE bigram substitution so e.g. "النها ٮ﮵ة" → "النهاية".
-    text = re.sub(
-        r'([\u0600-\u06FF\uFBB2-\uFBB6]) +([\u066E\u06A1\u062D\u0639\u0637\uFBB2-\uFBB6])',
-        r'\1\2', text,
-    )
     for src, tgt in _DECOMPOSED_MAP:
         text = text.replace(src, tgt)
     # Lone dotless bases that had no paired dot: map to the most common
@@ -228,6 +221,20 @@ class ArabicTextNormalizer:
             if not text.strip():
                 return ""
             text = self._join_ocr_lines(text)
+        else:
+            # Digital PDFs with decomposed font encoding sometimes emit a space
+            # between a word fragment and the following dotless-base glyph (ٮ/ڡ)
+            # because the glyphs render at visually separated positions.
+            # Remove those intra-word spaces before bigram mapping.
+            # ح/ع/ط are NOT included — they are standard Arabic letters that
+            # legitimately begin words.  FBB2–FBB6 are also excluded because
+            # they can appear as the first glyph of a word in this encoding.
+            # OCR word boundaries come from Tesseract's visual analysis and are
+            # reliable, so this step is skipped for the scanned path.
+            text = re.sub(
+                r'([\u0600-\u06FF\uFBB2-\uFBB6]) +([\u066E\u06A1])',
+                r'\1\2', text,
+            )
 
         # Reconstruct letters decomposed by unusual PDF font encoding
         # (dotless base glyph + Arabic Symbol Dot → standard letter).
