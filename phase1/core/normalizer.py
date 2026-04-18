@@ -79,6 +79,17 @@ _DECOMPOSED_MAP: list[tuple[str, str]] = [
     ('\u066E\uFBB4', '\u062A'),   # ٮ + ﮴ → ت
     ('\uFBB6\u066E', '\u062B'),   # ﮶ + ٮ → ث
     ('\u066E\uFBB6', '\u062B'),   # ٮ + ﮶ → ث
+    # ---- Haa (ح) family: jeem (ج) and khaa (خ) ----
+    ('\uFBB3\u062D', '\u062C'),   # ﮳ + ح → ج
+    ('\u062D\uFBB3', '\u062C'),   # ح + ﮳ → ج
+    ('\uFBB2\u062D', '\u062E'),   # ﮲ + ح → خ
+    ('\u062D\uFBB2', '\u062E'),   # ح + ﮲ → خ
+    # ---- Ain (ع) family: ghain (غ) ----
+    ('\uFBB2\u0639', '\u063A'),   # ﮲ + ع → غ
+    ('\u0639\uFBB2', '\u063A'),   # ع + ﮲ → غ
+    # ---- Tah (ط) family: zah (ظ) ----
+    ('\uFBB2\u0637', '\u0638'),   # ﮲ + ط → ظ
+    ('\u0637\uFBB2', '\u0638'),   # ط + ﮲ → ظ
 ]
 # Symbol-dot code points to strip after bigram mapping (FBB2–FBB6)
 _SYMBOL_DOTS = ''.join(chr(cp) for cp in range(0xFBB2, 0xFBB7))
@@ -92,6 +103,13 @@ def _fix_decomposed_arabic(text: str) -> str:
     Safe to call on both digital and scanned paths — a no-op when the special
     code points are absent.
     """
+    # Remove spurious spaces between Arabic text and symbol-dot/dotless-base
+    # sequences that some PDF fonts insert between decomposed letter pairs.
+    # Must run BEFORE bigram substitution so e.g. "النها ٮ﮵ة" → "النهاية".
+    text = re.sub(
+        r'([\u0600-\u06FF\uFBB2-\uFBB6]) +([\u066E\u06A1\u062D\u0639\u0637\uFBB2-\uFBB6])',
+        r'\1\2', text,
+    )
     for src, tgt in _DECOMPOSED_MAP:
         text = text.replace(src, tgt)
     # Lone dotless bases that had no paired dot: map to the most common
@@ -209,6 +227,7 @@ class ArabicTextNormalizer:
             text = self._strip_page_furniture(text)
             if not text.strip():
                 return ""
+            text = self._join_ocr_lines(text)
 
         # Reconstruct letters decomposed by unusual PDF font encoding
         # (dotless base glyph + Arabic Symbol Dot → standard letter).
@@ -303,6 +322,39 @@ class ArabicTextNormalizer:
                 continue
             cleaned.append(line)
         return "\n".join(cleaned)
+
+    _SENT_END = re.compile(r'[.؟!]\s*$')
+
+    @staticmethod
+    def _join_ocr_lines(text: str) -> str:
+        """
+        Join OCR output lines that belong to the same paragraph.
+
+        Tesseract emits one visual line per output line.  Lines that don't end
+        with a sentence terminal (. ؟ !) are joined with a space to their
+        successor.  Blank lines and sentence-terminal lines start a new paragraph.
+        """
+        lines = text.splitlines()
+        paragraphs: list[str] = []
+        buffer = ""
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                if buffer:
+                    paragraphs.append(buffer)
+                    buffer = ""
+                continue
+            if buffer:
+                if ArabicTextNormalizer._SENT_END.search(buffer):
+                    paragraphs.append(buffer)
+                    buffer = stripped
+                else:
+                    buffer += " " + stripped
+            else:
+                buffer = stripped
+        if buffer:
+            paragraphs.append(buffer)
+        return "\n\n".join(paragraphs)
 
     def _clean(self, text: str) -> str:
         for pat in self._NOISE_PATTERNS:

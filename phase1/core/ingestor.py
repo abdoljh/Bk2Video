@@ -327,11 +327,12 @@ class PDFIngestor:
         # Each entry: (x_left, x_right, y, text)
         # x_left  = leftmost char origin  → used for RTL sort (descending)
         # x_right = rightmost char bbox right edge → used for gap detection
-        span_entries: list[tuple[float, float, float, str]] = []
+        block_texts: list[str] = []
 
         for block in raw.get("blocks", []):
             if block.get("type") != 0:
                 continue
+            span_entries: list[tuple[float, float, float, str]] = []
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
                     char_data = span.get("chars", [])
@@ -460,6 +461,16 @@ class PDFIngestor:
                     y_rep = non_diac_ys[0] if non_diac_ys else y_origins[0]
                     span_entries.append((x_left, x_right, y_rep, span_text))
 
+            if span_entries:
+                block_text = PDFIngestor._span_entries_to_text(span_entries)
+                if block_text.strip():
+                    block_texts.append(block_text)
+
+        return "\n\n".join(block_texts)
+
+    @staticmethod
+    def _span_entries_to_text(span_entries: list[tuple[float, float, float, str]]) -> str:
+        """Convert a list of (x_left, x_right, y, text) span entries into paragraph text."""
         if not span_entries:
             return ""
 
