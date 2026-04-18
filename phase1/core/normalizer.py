@@ -48,6 +48,61 @@ _ALEF_MA  = '\u0622'   # آ
 _LAM      = '\u0644'   # ل
 _ALL_ALEF = {_ALEF, _ALEF_HA, _ALEF_HB, _ALEF_MA}
 
+# Mappings: (dotless-base | symbol-dot) bigrams → standard Arabic letter.
+# Some PDF fonts encode Arabic letters as a dotless glyph + a separate dot
+# symbol glyph.  PyMuPDF extracts these as two code points.  The dot may
+# precede OR follow the base glyph depending on the font vendor.
+#
+# Dotless Beh (U+066E ٮ) — base shared by ب ت ث ن ي:
+#   ﮳ (FBB3 dot-below)       + ٮ  →  ب  U+0628
+#   ﮵ (FBB5 two-dots-below)  + ٮ  →  ي  U+064A
+#   ﮲ (FBB2 dot-above)       + ٮ  →  ن  U+0646
+#   ﮴ (FBB4 two-dots-above)  + ٮ  →  ت  U+062A
+#   ﮶ (FBB6 three-dots-above)+ ٮ  →  ث  U+062B
+# Dotless Feh (U+06A1 ڡ) — base shared by ف ق:
+#   ﮲ (FBB2 dot-above)       + ڡ  →  ف  U+0641
+#   ﮴ (FBB4 two-dots-above)  + ڡ  →  ق  U+0642
+_DECOMPOSED_MAP: list[tuple[str, str]] = [
+    # ---- Dotless Feh pairs ----
+    ('\uFBB2\u06A1', '\u0641'),   # ﮲ + ڡ → ف
+    ('\u06A1\uFBB2', '\u0641'),   # ڡ + ﮲ → ف
+    ('\uFBB4\u06A1', '\u0642'),   # ﮴ + ڡ → ق
+    ('\u06A1\uFBB4', '\u0642'),   # ڡ + ﮴ → ق
+    # ---- Dotless Beh pairs ----
+    ('\uFBB3\u066E', '\u0628'),   # ﮳ + ٮ → ب
+    ('\u066E\uFBB3', '\u0628'),   # ٮ + ﮳ → ب
+    ('\uFBB5\u066E', '\u064A'),   # ﮵ + ٮ → ي
+    ('\u066E\uFBB5', '\u064A'),   # ٮ + ﮵ → ي
+    ('\uFBB2\u066E', '\u0646'),   # ﮲ + ٮ → ن
+    ('\u066E\uFBB2', '\u0646'),   # ٮ + ﮲ → ن
+    ('\uFBB4\u066E', '\u062A'),   # ﮴ + ٮ → ت
+    ('\u066E\uFBB4', '\u062A'),   # ٮ + ﮴ → ت
+    ('\uFBB6\u066E', '\u062B'),   # ﮶ + ٮ → ث
+    ('\u066E\uFBB6', '\u062B'),   # ٮ + ﮶ → ث
+]
+# Symbol-dot code points to strip after bigram mapping (FBB2–FBB6)
+_SYMBOL_DOTS = ''.join(chr(cp) for cp in range(0xFBB2, 0xFBB7))
+
+
+def _fix_decomposed_arabic(text: str) -> str:
+    """
+    Reconstruct Arabic letters that a PDF font split into dotless-base + dot-symbol.
+
+    Applied before NFC so the corrected code points can be canonically composed.
+    Safe to call on both digital and scanned paths — a no-op when the special
+    code points are absent.
+    """
+    for src, tgt in _DECOMPOSED_MAP:
+        text = text.replace(src, tgt)
+    # Lone dotless bases that had no paired dot: map to the most common
+    # representative letter for that base shape.
+    text = text.replace('\u06A1', '\u0641')   # ڡ → ف (lone dotless feh)
+    text = text.replace('\u066E', '\u0628')   # ٮ → ب (lone dotless beh)
+    # Strip any remaining symbol-dot characters (FBB2–FBB6)
+    for ch in _SYMBOL_DOTS:
+        text = text.replace(ch, '')
+    return text
+
 
 def fix_article(word: str) -> str:
     """
@@ -155,6 +210,11 @@ class ArabicTextNormalizer:
             if not text.strip():
                 return ""
 
+        # Reconstruct letters decomposed by unusual PDF font encoding
+        # (dotless base glyph + Arabic Symbol Dot → standard letter).
+        # Applied before NFC because NFC cannot compose these combinations.
+        text = _fix_decomposed_arabic(text)
+
         text = unicodedata.normalize("NFC", text)
 
         # Normalise non-standard Arabic letter variants to their MSA forms.
@@ -193,8 +253,17 @@ class ArabicTextNormalizer:
             source: Source = "scanned" if page.pdf_type == "scanned" else "digital"
             before = len(page.raw_text)
             page.raw_text = self.normalize(page.raw_text, source=source)
+            after = len(page.raw_text)
             logger.debug("Page %d [%s] normalised: %d → %d chars",
-                         page.page_number, source, before, len(page.raw_text))
+                         page.page_number, source, before, after)
+            if after == 0 and before > 0:
+                logger.warning("Page %d [%s] became EMPTY after normalisation (was %d chars). "
+                                "Check for encoding issues in the source PDF.",
+                                page.page_number, source, before)
+        empty = sum(1 for p in pages if not p.raw_text.strip())
+        if empty:
+            logger.info("normalize_pages: %d/%d pages empty after normalisation.",
+                        empty, len(pages))
         return pages
 
     def _strip_page_furniture(self, text: str) -> str:
