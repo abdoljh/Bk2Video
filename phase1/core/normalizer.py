@@ -331,6 +331,12 @@ class ArabicTextNormalizer:
         return "\n".join(cleaned)
 
     _SENT_END = re.compile(r'[.؟!]\s*$')
+    # Soft word cap per OCR paragraph.  Arabic prose rarely uses sentence
+    # terminals between every clause, so without a cap a whole page can collapse
+    # into one paragraph — a blob too large for the chunker to split further.
+    # 250 words ≈ 350 tokens, well under max_tokens=1500, so the chunker can
+    # still merge several paragraphs into a single chunk efficiently.
+    _MAX_PARA_WORDS = 250
 
     @staticmethod
     def _join_ocr_lines(text: str) -> str:
@@ -339,7 +345,8 @@ class ArabicTextNormalizer:
 
         Tesseract emits one visual line per output line.  Lines that don't end
         with a sentence terminal (. ؟ !) are joined with a space to their
-        successor.  Blank lines and sentence-terminal lines start a new paragraph.
+        successor.  Blank lines, sentence-terminal lines, and paragraphs that
+        exceed _MAX_PARA_WORDS start a new paragraph.
         """
         lines = text.splitlines()
         paragraphs: list[str] = []
@@ -352,7 +359,8 @@ class ArabicTextNormalizer:
                     buffer = ""
                 continue
             if buffer:
-                if ArabicTextNormalizer._SENT_END.search(buffer):
+                at_limit = len(buffer.split()) >= ArabicTextNormalizer._MAX_PARA_WORDS
+                if ArabicTextNormalizer._SENT_END.search(buffer) or at_limit:
                     paragraphs.append(buffer)
                     buffer = stripped
                 else:
