@@ -26,8 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_CHUNK_SEP  = "\n" + "─" * 60 + "\n"
-_PAGE_SEP   = "\n" + "═" * 60 + "\n"
+_PAGE_SEP = "\n" + "═" * 60 + "\n"
 
 
 class OutputWriter:
@@ -140,21 +139,5 @@ class OutputWriter:
     def _write_txt(
         self, ingestion: IngestionResult, chunks: list[Chunk], path: Path
     ) -> None:
-        src  = Path(ingestion.source_path).name
-        meta = ingestion.metadata
-        lines = [
-            f"# Phase 1 Output — {src}",
-            f"# PDF Type   : {ingestion.pdf_type}",
-            f"# Total pages: {ingestion.total_pages}",
-            f"# Chunks     : {len(chunks)}",
-            f"# Title      : {meta.get('title', 'N/A')}",
-            f"# Author     : {meta.get('author', 'N/A')}",
-            "",
-        ]
-
-        for chunk in chunks:
-            lines.append(f"[pp. {chunk.page_start}–{chunk.page_end}]")
-            lines.append(chunk.text)
-            lines.append(_CHUNK_SEP)
-
-        path.write_text("\n".join(lines), encoding="utf-8")
+        parts = [c.text.strip() for c in chunks if c.text.strip()]
+        path.write_text("\n\n".join(parts), encoding="utf-8")
