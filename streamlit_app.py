@@ -9,6 +9,7 @@ Repository root is the working directory on Community Cloud, so:
   • Secrets injected via         →  st.secrets  (never committed)
 """
 
+import html
 import json
 import logging
 import sys
@@ -90,6 +91,7 @@ h1, h2, h3 { font-family: 'Playfair Display', serif !important; }
     padding: 1rem 1.2rem; margin-bottom: 0.8rem;
     direction: rtl; text-align: right;
     font-size: 0.9rem; line-height: 1.8;
+    color: #1a1a1a;
 }
 .chunk-meta {
     font-family: 'DM Mono', monospace; font-size: 0.6rem;
@@ -445,7 +447,7 @@ if "result_meta" in st.session_state:
                 · pp. {c['page_start']}–{c['page_end']}
                 · {c['word_count']} words · ~{c['token_est']} tokens
               </div>
-              {c['text'][:500]}{"…" if len(c['text']) > 500 else ""}
+              {html.escape(c['text'][:500])}{"…" if len(c['text']) > 500 else ""}
             </div>""",
             unsafe_allow_html=True,
         )
