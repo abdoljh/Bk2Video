@@ -97,6 +97,11 @@ class Phase1Pipeline:
                 "paddleocr": OCRBackend.PADDLEOCR,
                 "tesseract": OCRBackend.TESSERACT,
             }
+            if self.cfg.ocr_backend not in _backend_map:
+                warnings.append(
+                    f"Unknown OCR backend '{self.cfg.ocr_backend}' — defaulting to EasyOCR."
+                )
+                logger.warning(warnings[-1])
             backend = _backend_map.get(self.cfg.ocr_backend, OCRBackend.EASYOCR)
             ocr = OCREngine(backend=backend, gpu=self.cfg.ocr_gpu)
             try:
@@ -149,7 +154,7 @@ class Phase1Pipeline:
                 )
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"Summarization failed: {exc}")
-                logger.warning(warnings[-1])
+                logger.exception("Summarization failed")
         elif not self.cfg.anthropic_api_key:
             warnings.append("No Anthropic API key — script generation skipped.")
             logger.info(warnings[-1])

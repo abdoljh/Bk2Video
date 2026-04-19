@@ -17,6 +17,7 @@ Fallback : Mishkal — fully offline, slightly lower accuracy.
 from __future__ import annotations
 
 import logging
+import re
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ class ArabicDiacritizer:
 
     def _split_chunks(self, text: str) -> list[str]:
         """Split on sentence boundaries, respecting chunk_size."""
-        sentences = text.replace(".", ".\n").replace("،", "،\n").splitlines()
+        sentences = re.split(r'(?<=[.؟!])\s+', text)
         chunks, current = [], ""
         for sent in sentences:
             if len(current) + len(sent) > self.chunk_size:

@@ -236,7 +236,7 @@ class BookSummarizer:
         try:
             raw = self._call(prompt, model=_HAIKU, max_tokens=400)
             # Extract JSON from response
-            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            m = re.search(r'\{.*?\}', raw, re.DOTALL)
             data = json.loads(m.group()) if m else {}
             scores = {
                 "hook":      int(data.get("hook", 5)),

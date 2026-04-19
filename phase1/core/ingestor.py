@@ -214,58 +214,59 @@ class PDFIngestor:
         meta  = self._extract_metadata(doc)
         pages: list[RawPage] = []
 
-        for i, page in enumerate(doc):
-            page_num   = i + 1
-            probe_text = page.get_text("text").strip()
-            is_digital = len(probe_text) >= _DIGITAL_CHARS_THRESHOLD
+        try:
+            for i, page in enumerate(doc):
+                page_num   = i + 1
+                probe_text = page.get_text("text").strip()
+                is_digital = len(probe_text) >= _DIGITAL_CHARS_THRESHOLD
 
-            # Even if the page has plenty of text, route to OCR when the font
-            # encoding is corrupted.  Two distinct corruption types are detected:
-            #   1. Latin-1 Supplement chars (U+0080–00FF) map Arabic glyphs to
-            #      extended-Latin code points.
-            #   2. Arabic Extended chars (U+063C–003F) appear as letter substitutes
-            #      due to an internal Arabic block remapping in the font's CMap.
-            if is_digital and self._is_corrupted(page):
-                logger.warning(
-                    "Page %d of '%s' has corrupted font encoding — routing to OCR.",
-                    page_num, pdf_path.name,
-                )
-                is_digital = False
-
-            if is_digital:
-                text = self._extract_rtl_text(page)
-                # Auto-detect decomposed font encoding (dotless-base + symbol-dot
-                # pairs) and re-route to OCR.  These PDFs produce far cleaner
-                # output from Tesseract than from any text-extraction algorithm.
-                # The check is O(n) on page text — negligible vs. rendering cost.
-                if _DECOMPOSED_MARKERS.search(text):
-                    logger.info(
-                        "Page %d of '%s': decomposed Arabic font encoding detected"
-                        " — re-routing to OCR.",
+                # Even if the page has plenty of text, route to OCR when the font
+                # encoding is corrupted.  Two distinct corruption types are detected:
+                #   1. Latin-1 Supplement chars (U+0080–00FF) map Arabic glyphs to
+                #      extended-Latin code points.
+                #   2. Arabic Extended chars (U+063C–003F) appear as letter substitutes
+                #      due to an internal Arabic block remapping in the font's CMap.
+                if is_digital and self._is_corrupted(page):
+                    logger.warning(
+                        "Page %d of '%s' has corrupted font encoding — routing to OCR.",
                         page_num, pdf_path.name,
                     )
-                    is_digital = False   # fall through to image render below
+                    is_digital = False
 
-            if is_digital:
-                pages.append(RawPage(
-                    page_number  = page_num,
-                    pdf_type     = "digital",
-                    raw_text     = text,
-                    raw_text_pre = text,
-                ))
-            else:
-                mat       = fitz.Matrix(self.dpi / 72, self.dpi / 72)
-                pix       = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                img_bytes = pix.tobytes("png")
-                pages.append(RawPage(
-                    page_number  = page_num,
-                    pdf_type     = "scanned",
-                    raw_text     = "",
-                    raw_text_pre = "",
-                    image_bytes  = img_bytes,
-                ))
+                if is_digital:
+                    text = self._extract_rtl_text(page)
+                    # Auto-detect decomposed font encoding (dotless-base + symbol-dot
+                    # pairs) and re-route to OCR.  These PDFs produce far cleaner
+                    # output from Tesseract than from any text-extraction algorithm.
+                    # The check is O(n) on page text — negligible vs. rendering cost.
+                    if _DECOMPOSED_MARKERS.search(text):
+                        logger.info(
+                            "Page %d of '%s': decomposed Arabic font encoding detected"
+                            " — re-routing to OCR.",
+                            page_num, pdf_path.name,
+                        )
+                        is_digital = False   # fall through to image render below
 
-        doc.close()
+                if is_digital:
+                    pages.append(RawPage(
+                        page_number  = page_num,
+                        pdf_type     = "digital",
+                        raw_text     = text,
+                        raw_text_pre = text,
+                    ))
+                else:
+                    mat       = fitz.Matrix(self.dpi / 72, self.dpi / 72)
+                    pix       = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                    img_bytes = pix.tobytes("png")
+                    pages.append(RawPage(
+                        page_number  = page_num,
+                        pdf_type     = "scanned",
+                        raw_text     = "",
+                        raw_text_pre = "",
+                        image_bytes  = img_bytes,
+                    ))
+        finally:
+            doc.close()
         digital = sum(1 for p in pages if p.pdf_type == "digital")
         scanned = sum(1 for p in pages if p.pdf_type == "scanned")
         overall_type: PDFType = (
@@ -568,8 +569,8 @@ class PDFIngestor:
                     else:
                         pending_diac += t
                 else:
-                    _ALEF_CHARS = '\u0627\u0622\u0623\u0625\u0671'
-                    if pending_diac and pending_diac[0] in _ALEF_CHARS:
+                    _ALEF_JOIN = '\u0627\u0622\u0623\u0625\u0671'
+                    if pending_diac and pending_diac[0] in _ALEF_JOIN:
                         merged.append((x_l, x_r, t + pending_diac))
                     else:
                         merged.append((x_l, x_r, pending_diac + t))
