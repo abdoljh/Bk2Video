@@ -221,6 +221,12 @@ class ArabicTextNormalizer:
             if not text.strip():
                 return ""
             text = self._join_ocr_lines(text)
+            # Tesseract frequently misreads Arabic comma ، (U+060C) as » (U+00BB).
+            # Replace » with ، when surrounded by Arabic text (mid-sentence position).
+            text = re.sub(
+                r'(?<=[\u0600-\u06FF\u064B-\u065F\u0660-\u0669])»(?=\s)',
+                '،', text,
+            )
         else:
             # Digital PDFs with decomposed font encoding sometimes emit a space
             # between a word fragment and the following dotless-base glyph (ٮ/ڡ)
