@@ -90,20 +90,25 @@ class SemanticChunker:
 
         chunks: list[Chunk] = []
         chunk_id = 0
-        pending_stub = ""   # short section text buffered to prepend to next real chunk
+        pending_stub = ""   # buffered text (heading + short body) prepended to next real chunk
+
+        # Synthetic labels produced by _split_by_chapters — not actual PDF headings
+        _synthetic = {"intro", "full_book"}
 
         for chapter_title, section_text in sections:
             # 3. Split each section into token-safe pieces
             pieces = self._split_to_token_limit(section_text)
+            # Prepend the real heading text so it appears in chunk.text output
+            is_real_heading = chapter_title not in _synthetic
             for piece in pieces:
-                if len(piece.split()) < self.min_chunk_words:
-                    # Buffer stub (chapter title line + short body) so it is
-                    # prepended to the next real chunk rather than discarded.
-                    pending_stub = (pending_stub + "\n\n" + piece.strip()).strip() if pending_stub else piece.strip()
+                piece_text = (chapter_title + "\n\n" + piece.strip()) if is_real_heading else piece.strip()
+                if len(piece_text.split()) < self.min_chunk_words:
+                    # Buffer heading + body so it is prepended to next real chunk
+                    pending_stub = (pending_stub + "\n\n" + piece_text).strip() if pending_stub else piece_text
                     logger.debug("Buffering stub (%d words) in section '%s': %r",
-                                 len(piece.split()), chapter_title, piece[:60])
+                                 len(piece_text.split()), chapter_title, piece_text[:60])
                     continue
-                text = (pending_stub + "\n\n" + piece.strip()).strip() if pending_stub else piece.strip()
+                text = (pending_stub + "\n\n" + piece_text).strip() if pending_stub else piece_text
                 pending_stub = ""
                 page_s, page_e = self._estimate_pages(piece, page_map)
                 chunks.append(Chunk(
