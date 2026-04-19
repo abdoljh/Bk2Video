@@ -148,23 +148,45 @@ class SemanticChunker:
         """
         Returns list of (chapter_title, chapter_text).
         Falls back to [("full_book", text)] if no headings detected.
+
+        Consecutive headings with no body text between them (e.g. a chapter
+        title followed immediately by a subtitle) are accumulated and prepended
+        to the next section that does have body content.  This prevents title
+        and subtitle lines from being silently discarded.
         """
         matches = list(_HEADING_PATTERN.finditer(text))
         if not matches:
             return [("full_book", text)]
 
-        sections = []
-        # Include any text that appears before the first heading
+        sections: list[tuple[str, str]] = []
+        pending: list[str] = []   # heading-only lines awaiting a body
+
         pre = text[:matches[0].start()].strip()
         if pre:
             sections.append(("intro", pre))
+
         for i, m in enumerate(matches):
             title = m.group(1).strip()
             start = m.end()
             end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             section_text = text[start:end].strip()
+
             if section_text:
+                if pending:
+                    section_text = "\n\n".join(pending) + "\n\n" + section_text
+                    pending = []
                 sections.append((title, section_text))
+            else:
+                pending.append(title)
+
+        # Flush any trailing headings with no body after them
+        if pending:
+            extra = "\n\n".join(pending)
+            if sections:
+                last_title, last_text = sections[-1]
+                sections[-1] = (last_title, last_text + "\n\n" + extra)
+            else:
+                sections.append(("full_book", extra))
 
         return sections if sections else [("full_book", text)]
 
