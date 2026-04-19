@@ -86,6 +86,8 @@ class OCREngine:
             if page.image_bytes:
                 page.raw_text = ocr_fn(page.image_bytes)
                 logger.debug("Page %d OCR'd — %d chars", page.page_number, len(page.raw_text))
+            else:
+                logger.warning("Page %d marked scanned but has no image bytes — skipping.", page.page_number)
 
         return pages
 
@@ -189,5 +191,8 @@ class OCREngine:
         from PIL import Image  # noqa: PLC0415
 
         img = Image.open(io.BytesIO(image_bytes))
-        # osd+ara: auto-detect orientation + Arabic language
-        return self._reader.image_to_string(img, lang="ara", config="--psm 3")
+        try:
+            return self._reader.image_to_string(img, lang="ara", config="--psm 3")
+        except Exception as exc:
+            logger.warning("Tesseract OCR failed on page: %s", exc)
+            return ""
