@@ -63,6 +63,11 @@ _CORRUPT_LATIN1_THRESHOLD  = 0.05  # Latin-1 (U+0080–00FF) fraction above whic
                                    # signal a PDF font with a custom glyph encoding
                                    # that maps Arabic glyphs to extended-Latin code
                                    # points — yielding garbage from any text extractor.
+# Decomposed-encoding markers: Arabic Symbol Dots (U+FBB2–FBB6) and the two
+# dotless base glyphs (U+066E ٮ, U+06A1 ڡ).  Their presence in digitally-extracted
+# text means the font encodes letters as dotless-base + separate dot glyph —
+# a class of PDF that OCR handles far better than any text-extraction algorithm.
+_DECOMPOSED_MARKERS = re.compile(r'[\uFBB2-\uFBB6\u066E\u06A1]')
 # U+063C–063F: Arabic Extended letters (ؼ ؽ ؾ ؿ) that virtually never appear in
 # standard Modern Arabic text.  Their presence signals an internal Arabic block
 # remapping (a different corruption from Latin-1; detected in e.g. Sample 6).
@@ -229,6 +234,19 @@ class PDFIngestor:
 
             if is_digital:
                 text = self._extract_rtl_text(page)
+                # Auto-detect decomposed font encoding (dotless-base + symbol-dot
+                # pairs) and re-route to OCR.  These PDFs produce far cleaner
+                # output from Tesseract than from any text-extraction algorithm.
+                # The check is O(n) on page text — negligible vs. rendering cost.
+                if _DECOMPOSED_MARKERS.search(text):
+                    logger.info(
+                        "Page %d of '%s': decomposed Arabic font encoding detected"
+                        " — re-routing to OCR.",
+                        page_num, pdf_path.name,
+                    )
+                    is_digital = False   # fall through to image render below
+
+            if is_digital:
                 pages.append(RawPage(
                     page_number  = page_num,
                     pdf_type     = "digital",
