@@ -153,11 +153,7 @@ class OutputWriter:
         ]
 
         for chunk in chunks:
-            lines.append(
-                f"[Chunk {chunk.chunk_id:04d} | {chunk.chapter} | "
-                f"pp. {chunk.page_start}–{chunk.page_end} | "
-                f"{chunk.word_count} words / ~{chunk.token_est} tokens]"
-            )
+            lines.append(f"[pp. {chunk.page_start}–{chunk.page_end}]")
             lines.append(chunk.text)
             lines.append(_CHUNK_SEP)
 

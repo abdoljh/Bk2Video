@@ -317,7 +317,7 @@ class ArabicTextNormalizer:
             # Skip short lines with digits at start/end of page block
             # (running headers like "مقدمة  37" or "37 مقدمة")
             if (len(stripped) <= 60
-                    and re.search(r'\d', stripped)
+                    and re.search(r'[0-9]', stripped)   # ASCII digits only — avoids matching Arabic-Indic chapter numerals (١ الفصل)
                     and re.search(r'[\u0600-\u06FF]', stripped)
                     and (i == 0 or not lines[i-1].strip())):
                 continue
