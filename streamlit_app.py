@@ -21,6 +21,7 @@ import streamlit as st
 # ── Phase 1 package is at ./phase1 relative to repo root ──────────────── #
 sys.path.insert(0, str(Path(__file__).parent))
 from phase1 import Phase1Pipeline, Phase1Config  # noqa: E402
+from phase2 import synthesize as tts_synthesize  # noqa: E402
 
 # ── Logging ───────────────────────────────────────────────────────────── #
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
@@ -532,7 +533,7 @@ if p2_source == "Phase 1 output":
         if has_plain:
             variants.append("Plain")
         p2_variant = st.radio("Script variant", variants, horizontal=True, key="p2_variant")
-        if "Diacritized" in p2_variant:
+        if p2_variant.startswith("Diacritized"):
             p2_text  = st.session_state["script_diac_bytes"].decode("utf-8", errors="replace")
             p2_label = "diacritized"
         else:
@@ -554,27 +555,32 @@ if p2_text:
     with st.expander("Preview script"):
         st.markdown(
             f"<div style='direction:rtl;text-align:right;font-size:0.95rem;"
-            f"line-height:1.9;background:#fefcf8;padding:1.2rem 1.5rem;"
-            f"border:1px solid #e0dbd0;border-radius:4px'>{p2_text}</div>",
+            f"line-height:1.9;background:#fefcf8;color:#1a1a1a;padding:1.2rem 1.5rem;"
+            f"border:1px solid #e0dbd0;border-radius:4px'>{html.escape(p2_text)}</div>",
             unsafe_allow_html=True,
         )
 
     tts_key = "gtts" if tts_backend == "gTTS (free)" else "elevenlabs"
 
+    if tts_key == "elevenlabs" and (not el_api_key or not el_voice_id):
+        st.warning("ElevenLabs requires both an API key and a Voice ID — fill them in the sidebar.")
+
     if st.button("🎙 Generate Audio", type="primary", use_container_width=True, key="p2_gen"):
-        if tts_key == "elevenlabs":
-            st.warning("ElevenLabs integration is not yet implemented. Please select **gTTS (free)**.")
-        else:
-            with st.spinner("Synthesizing with gTTS…"):
-                try:
-                    from phase2.tts import synthesize
-                    audio = synthesize(p2_text, backend="gtts")
-                    st.session_state["p2_audio_bytes"] = audio
-                    st.session_state["p2_audio_label"] = p2_label
-                    st.success("Audio ready ✓")
-                except Exception as exc:
-                    st.error(f"TTS failed: {exc}")
-                    logging.exception("Phase 2 TTS error")
+        backend_label = "gTTS" if tts_key == "gtts" else "ElevenLabs"
+        with st.spinner(f"Synthesizing with {backend_label}…"):
+            try:
+                audio = tts_synthesize(
+                    p2_text,
+                    backend=tts_key,
+                    elevenlabs_api_key=el_api_key,
+                    elevenlabs_voice_id=el_voice_id,
+                )
+                st.session_state["p2_audio_bytes"] = audio
+                st.session_state["p2_audio_label"] = p2_label
+                st.success("Audio ready ✓")
+            except Exception as exc:
+                st.error(f"TTS failed: {exc}")
+                logging.exception("Phase 2 TTS error")
 
 if "p2_audio_bytes" in st.session_state:
     import base64

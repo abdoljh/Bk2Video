@@ -9,7 +9,6 @@ gtts        Google TTS (gTTS). Free, no API key required.
 
 elevenlabs  ElevenLabs API. Premium Arabic voices (e.g. Chaouki).
             Requires API key + voice ID.
-            Planned for production use — not yet implemented.
 """
 
 from __future__ import annotations
@@ -22,6 +21,8 @@ TtsBackend = Literal["gtts", "elevenlabs"]
 
 def synthesize_gtts(text: str) -> bytes:
     """Synthesize Arabic text to MP3 via Google TTS. Returns MP3 bytes."""
+    if not text.strip():
+        raise ValueError("Text is empty — nothing to synthesize.")
     from gtts import gTTS  # lazy import — keeps app startup fast when unused
 
     buf = io.BytesIO()
@@ -50,13 +51,32 @@ def synthesize(
     -------
     bytes — MP3 audio.
     """
+    if not text.strip():
+        raise ValueError("Text is empty — nothing to synthesize.")
+
     if backend == "gtts":
         return synthesize_gtts(text)
 
     if backend == "elevenlabs":
-        raise NotImplementedError(
-            "ElevenLabs integration is planned for a later Phase 2 sprint. "
-            "Select gTTS for development use."
+        if not elevenlabs_api_key:
+            raise ValueError("elevenlabs_api_key is required for the ElevenLabs backend.")
+        if not elevenlabs_voice_id:
+            raise ValueError("elevenlabs_voice_id is required for the ElevenLabs backend.")
+        import requests  # noqa: PLC0415
+        resp = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{elevenlabs_voice_id}",
+            headers={
+                "xi-api-key": elevenlabs_api_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            },
+            timeout=120,
         )
+        resp.raise_for_status()
+        return resp.content
 
     raise ValueError(f"Unknown TTS backend: {backend!r}")
