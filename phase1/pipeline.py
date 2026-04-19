@@ -37,6 +37,10 @@ class Phase1Config:
     # LLM summarization
     anthropic_api_key: str = ""
     script_genre:   str    = "non-fiction"   # hint for Scriptwriter tone
+    # Optional book metadata injected into the formal presentation section
+    book_author:    str    = ""   # e.g. "تحقيق وتقديم نجدة فتحي صفوة"
+    book_pages:     int    = 0    # actual page count (0 = omit from script)
+    book_structure: str    = ""   # e.g. "مقدمة و١٦ فصلاً وملاحق"
 
 
 @dataclass
@@ -142,9 +146,12 @@ class Phase1Pipeline:
             try:
                 self._progress("Summarising book (Reader + Consolidator) …", 0.70)
                 summarizer = BookSummarizer(
-                    api_key    = self.cfg.anthropic_api_key,
-                    genre      = self.cfg.script_genre,
-                    output_dir = self.cfg.output_dir,
+                    api_key        = self.cfg.anthropic_api_key,
+                    genre          = self.cfg.script_genre,
+                    output_dir     = self.cfg.output_dir,
+                    book_author    = self.cfg.book_author,
+                    book_pages     = self.cfg.book_pages,
+                    book_structure = self.cfg.book_structure,
                 )
                 self._progress("Writing script (Scriptwriter) …", 0.82)
                 script_path, script_diac_path, script_meta_path = summarizer.run(
