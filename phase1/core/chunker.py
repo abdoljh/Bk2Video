@@ -90,30 +90,55 @@ class SemanticChunker:
 
         chunks: list[Chunk] = []
         chunk_id = 0
-        skipped_stubs = 0
+        pending_stub = ""   # short section text buffered to prepend to next real chunk
 
         for chapter_title, section_text in sections:
             # 3. Split each section into token-safe pieces
             pieces = self._split_to_token_limit(section_text)
             for piece in pieces:
                 if len(piece.split()) < self.min_chunk_words:
-                    skipped_stubs += 1
-                    logger.debug("Skipping stub (%d words) in section '%s': %r",
+                    # Buffer stub (chapter title line + short body) so it is
+                    # prepended to the next real chunk rather than discarded.
+                    pending_stub = (pending_stub + "\n\n" + piece.strip()).strip() if pending_stub else piece.strip()
+                    logger.debug("Buffering stub (%d words) in section '%s': %r",
                                  len(piece.split()), chapter_title, piece[:60])
                     continue
+                text = (pending_stub + "\n\n" + piece.strip()).strip() if pending_stub else piece.strip()
+                pending_stub = ""
                 page_s, page_e = self._estimate_pages(piece, page_map)
                 chunks.append(Chunk(
                     chunk_id   = chunk_id,
                     chapter    = chapter_title,
                     page_start = page_s,
                     page_end   = page_e,
-                    text       = piece.strip(),
+                    text       = text,
                 ))
                 chunk_id += 1
 
+        # Flush any trailing stub into the last chunk (or as its own chunk)
+        if pending_stub:
+            if chunks:
+                last = chunks[-1]
+                chunks[-1] = Chunk(
+                    chunk_id   = last.chunk_id,
+                    chapter    = last.chapter,
+                    page_start = last.page_start,
+                    page_end   = last.page_end,
+                    text       = last.text + "\n\n" + pending_stub,
+                )
+            else:
+                page_s, page_e = self._estimate_pages(pending_stub, page_map)
+                chunks.append(Chunk(
+                    chunk_id   = 0,
+                    chapter    = "intro",
+                    page_start = page_s,
+                    page_end   = page_e,
+                    text       = pending_stub,
+                ))
+
         logger.info(
-            "Chunked into %d pieces (max_tokens=%d, overlap=%d, stubs_skipped=%d).",
-            len(chunks), self.max_tokens, self.overlap_tokens, skipped_stubs,
+            "Chunked into %d pieces (max_tokens=%d, overlap=%d).",
+            len(chunks), self.max_tokens, self.overlap_tokens,
         )
         if len(chunks) == 0:
             logger.warning(
