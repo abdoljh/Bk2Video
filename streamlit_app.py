@@ -184,6 +184,23 @@ with st.sidebar:
         index=0,
         help="Affects the tone of the generated script.",
     )
+    book_author = st.text_input(
+        "Author / Editor / Translator",
+        placeholder="e.g. تحقيق وتقديم نجدة فتحي صفوة",
+        help="Injected verbatim into the formal book-presentation section of the script.",
+    )
+    book_pages = st.number_input(
+        "Total Pages",
+        min_value=0,
+        value=0,
+        step=1,
+        help="Actual page count of the full book (0 = omit from script).",
+    )
+    book_structure = st.text_input(
+        "Book Structure",
+        placeholder="e.g. مقدمة و١٦ فصلاً وملاحق",
+        help="Brief Arabic description of chapters / sections / appendices.",
+    )
 
     st.markdown("---")
     st.markdown("#### 🎙 Phase 2: TTS")
@@ -275,6 +292,9 @@ if uploaded:
                 output_dir=str(output_dir),
                 anthropic_api_key=anthropic_key,
                 script_genre=script_genre,
+                book_author=book_author,
+                book_pages=int(book_pages),
+                book_structure=book_structure,
             )
 
             try:

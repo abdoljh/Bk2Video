@@ -68,15 +68,21 @@ class BookSummarizer:
 
     def __init__(
         self,
-        api_key:    str,
-        genre:      str = "non-fiction",
-        output_dir: str | Path = "output",
+        api_key:        str,
+        genre:          str = "non-fiction",
+        output_dir:     str | Path = "output",
+        book_author:    str = "",
+        book_pages:     int = 0,
+        book_structure: str = "",
     ):
-        self.api_key    = api_key
-        self.genre      = genre
-        self.output_dir = Path(output_dir)
+        self.api_key        = api_key
+        self.genre          = genre
+        self.output_dir     = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._client    = None   # lazy
+        self.book_author    = book_author
+        self.book_pages     = book_pages
+        self.book_structure = book_structure
+        self._client        = None   # lazy
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -197,6 +203,29 @@ class BookSummarizer:
             f"\nملاحظات المحرر للمراجعة:\n{feedback}\n" if feedback else ""
         )
         title_line = f"«{title}» " if title else ""
+        # Build the formal-presentation fact block from whatever metadata is known
+        meta_facts: list[str] = []
+        if self.book_author:
+            meta_facts.append(f"المؤلف/المحقق: {self.book_author}")
+        if self.book_pages:
+            meta_facts.append(f"عدد الصفحات: {self.book_pages}")
+        if self.book_structure:
+            meta_facts.append(f"هيكل الكتاب: {self.book_structure}")
+
+        if meta_facts:
+            presentation_instruction = (
+                "4. تقديم رسمي للكتاب في نهاية السكريبت. استخدم هذه المعلومات كما هي:\n"
+                + "".join(f"   • {f}\n" for f in meta_facts)
+                + "   أبرز ما يجده القارئ بين دفتيه، ثم ادعُ المشاهد صراحةً لاقتناء الكتاب وقراءته.\n"
+            )
+        else:
+            presentation_instruction = (
+                "4. تقديم رسمي للكتاب في نهاية السكريبت: اذكر عنوان الكتاب، وأبرز ما يجده\n"
+                "   القارئ بين دفتيه، ثم ادعُ المشاهد صراحةً لاقتناء الكتاب وقراءته.\n"
+                "   تنبيه: اذكر أسماء المؤلف والمحرر والمترجم فقط إذا وردت صراحةً في\n"
+                "   المخطط المقدّم أدناه. لا تخترع أي اسم أو دور لم يُذكر في المخطط.\n"
+            )
+
         prompt = (
             f"أنت كاتب سيناريو محترف متخصص في المحتوى الثقافي العربي.\n"
             f"بناءً على المخطط التالي لكتاب {title_line}من نوع {self.genre}،\n"
@@ -204,10 +233,7 @@ class BookSummarizer:
             "1. خطاف افتتاحي مشوّق — الجملة الأولى تجذب الانتباه فوراً\n"
             "2. ثلاث نقاط محورية من الكتاب مع أمثلة أو لحظات بارزة\n"
             "3. خاتمة تدفع المستمع للتفكير أو القراءة\n"
-            "4. تقديم رسمي للكتاب في نهاية السكريبت: اذكر عنوان الكتاب، وأبرز ما يجده\n"
-            "   القارئ بين دفتيه، ثم ادعُ المشاهد صراحةً لاقتناء الكتاب وقراءته.\n"
-            "   تنبيه: اذكر أسماء المؤلف والمحرر والمترجم فقط إذا وردت صراحةً في\n"
-            "   المخطط المقدّم أدناه. لا تخترع أي اسم أو دور لم يُذكر في المخطط.\n"
+            f"{presentation_instruction}"
             f"النبرة: {tone}.\n"
             "لا تبدأ بـ'في هذا الفيديو' أو ما شابهها. لا تذكر كلمة 'سكريبت'.\n"
             "مهم جداً: أكمل كل جملة حتى نهايتها الطبيعية حتى لو تجاوزت حد الكلمات قليلاً.\n"
