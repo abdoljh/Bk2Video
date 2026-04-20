@@ -111,7 +111,11 @@ class BookSummarizer:
         _prog("Writing script …", 0.80)
         result = self._scriptwriter_editor_loop(outline, title)
 
-        # Step 7: Diacritize
+        # Clean raw LLM output: strip markdown artifacts, add TTS pause markers
+        result.script     = self._clean_script(result.script)
+        result.word_count = len(result.script.split())
+
+        # Step 7: Diacritize the cleaned script
         _prog("Diacritizing script …", 0.92)
         result.script_diac = self._diacritize(result.script)
 
@@ -334,6 +338,62 @@ class BookSummarizer:
             retries_used = retries,
             editor_feedback = feedback,
         )
+
+    # ------------------------------------------------------------------ #
+    #  Script post-processing (TTS readiness)                             #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _clean_script(text: str) -> str:
+        """
+        Strip markdown artifacts and add TTS pause markers to headings.
+
+        1. Lines starting with # / ## / ### → strip the marker.
+        2. Lines matching ^-{2,}$ → drop entirely (section dividers).
+        3. Heading lines (explicit # OR bare short Arabic line preceded by
+           a blank) → append sukun + period so TTS treats them as a
+           complete utterance rather than merging into the next sentence.
+        """
+        def _term(line: str) -> str:
+            # Remove trailing diacritics and any existing period, then add ْ.
+            line = re.sub(r'[\u064B-\u065F\u0670]+$', '', line.rstrip())
+            line = line.rstrip('.').rstrip()
+            return line + 'ْ.'
+
+        lines = text.splitlines()
+        tagged: list[tuple[str, str]] = []
+        for line in lines:
+            s = line.rstrip()
+            m = re.match(r'^#{1,3}\s*', s)
+            if m:
+                tagged.append(('heading', s[m.end():].rstrip()))
+            elif re.match(r'^-{2,}\s*$', s):
+                tagged.append(('rule', ''))
+            else:
+                tagged.append(('body', s))
+
+        out: list[str] = []
+        prev_blank = True   # start-of-text counts as blank
+        for kind, content in tagged:
+            if kind == 'rule':
+                prev_blank = True
+                continue
+            if kind == 'heading':
+                if content:
+                    out.append(_term(content))
+                prev_blank = False
+                continue
+            # Promote bare short Arabic lines preceded by a blank line
+            if (content and prev_blank
+                    and 4 <= len(content) <= 60
+                    and not re.search(r'[.،؛؟!]', content)
+                    and re.search(r'[\u0600-\u06FF]', content)):
+                out.append(_term(content))
+            else:
+                out.append(content)
+            prev_blank = not content.strip()
+
+        return re.sub(r'\n{3,}', '\n\n', '\n'.join(out)).strip()
 
     # ------------------------------------------------------------------ #
     #  Step 7 — Diacritize (Mishkal, local, no API cost)                  #

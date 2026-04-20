@@ -528,11 +528,20 @@ if p2_source == "Phase 1 output":
         )
     else:
         variants = []
-        if has_diac:
-            variants.append("Diacritized (recommended for TTS)")
         if has_plain:
-            variants.append("Plain")
-        p2_variant = st.radio("Script variant", variants, horizontal=True, key="p2_variant")
+            variants.append("Plain (recommended)")
+        if has_diac:
+            variants.append("Diacritized")
+        p2_variant = st.radio(
+            "Script variant", variants, horizontal=True, key="p2_variant",
+            help=(
+                "**Plain** — recommended for both gTTS and ElevenLabs. "
+                "The script is pre-cleaned (no markdown, TTS pause markers on headings). "
+                "ElevenLabs applies its own diacritization internally.\n\n"
+                "**Diacritized** — Mishkal harakat added. "
+                "May conflict with ElevenLabs prosody on sentence-final consonants."
+            ),
+        )
         if p2_variant.startswith("Diacritized"):
             p2_text  = st.session_state["script_diac_bytes"].decode("utf-8", errors="replace")
             p2_label = "diacritized"
