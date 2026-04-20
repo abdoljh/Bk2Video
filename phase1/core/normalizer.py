@@ -320,12 +320,16 @@ class ArabicTextNormalizer:
             # Skip standalone page numbers
             if re.match(r'^\d+$', stripped):
                 continue
-            # Skip short lines with digits at start/end of page block
-            # (running headers like "مقدمة  37" or "37 مقدمة")
+            # Strip trailing page number from short lines at page-block boundaries
+            # (running headers like "مقدمة  37" or chapter titles like "في مضارب السنوسي 5 0").
+            # Keep the Arabic content; drop only the trailing digit(s)/spaces.
             if (len(stripped) <= 60
                     and re.search(r'[0-9]', stripped)   # ASCII digits only — avoids matching Arabic-Indic chapter numerals (١ الفصل)
                     and re.search(r'[\u0600-\u06FF]', stripped)
                     and (i == 0 or not lines[i-1].strip())):
+                arabic_only = re.sub(r'[\s0-9]+$', '', stripped).strip()
+                if arabic_only:
+                    cleaned.append(arabic_only)
                 continue
             # Skip footnote separator lines
             if re.match(r'^[─━═\-─]{4,}', stripped):
@@ -337,6 +341,9 @@ class ArabicTextNormalizer:
         return "\n".join(cleaned)
 
     _SENT_END = re.compile(r'[.؟!]\s*$')
+    # Heading line: short (4–60 chars), no sentence-terminal punctuation.
+    # Used in _join_ocr_lines to avoid merging a chapter title with the next body line.
+    _HEADING_LINE = re.compile(r'^(?!.*[.،؛؟!]).{4,60}$')
     # Soft word cap per OCR paragraph.  Arabic prose rarely uses sentence
     # terminals between every clause, so without a cap a whole page can collapse
     # into one paragraph — a blob too large for the chunker to split further.
@@ -351,8 +358,8 @@ class ArabicTextNormalizer:
 
         Tesseract emits one visual line per output line.  Lines that don't end
         with a sentence terminal (. ؟ !) are joined with a space to their
-        successor.  Blank lines, sentence-terminal lines, and paragraphs that
-        exceed _MAX_PARA_WORDS start a new paragraph.
+        successor.  Blank lines, sentence-terminal lines, heading lines, and
+        paragraphs that exceed _MAX_PARA_WORDS start a new paragraph.
         """
         lines = text.splitlines()
         paragraphs: list[str] = []
@@ -366,7 +373,8 @@ class ArabicTextNormalizer:
                 continue
             if buffer:
                 at_limit = len(buffer.split()) >= ArabicTextNormalizer._MAX_PARA_WORDS
-                if ArabicTextNormalizer._SENT_END.search(buffer) or at_limit:
+                is_heading = bool(ArabicTextNormalizer._HEADING_LINE.match(buffer))
+                if ArabicTextNormalizer._SENT_END.search(buffer) or at_limit or is_heading:
                     paragraphs.append(buffer)
                     buffer = stripped
                 else:
