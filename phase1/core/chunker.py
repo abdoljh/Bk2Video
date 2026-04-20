@@ -92,16 +92,11 @@ class SemanticChunker:
         chunk_id = 0
         pending_stub = ""   # buffered text (heading + short body) prepended to next real chunk
 
-        # Synthetic labels produced by _split_by_chapters — not actual PDF headings
-        _synthetic = {"intro", "full_book"}
-
         for chapter_title, section_text in sections:
             # 3. Split each section into token-safe pieces
             pieces = self._split_to_token_limit(section_text)
-            # Prepend the real heading text so it appears in chunk.text output
-            is_real_heading = chapter_title not in _synthetic
             for piece in pieces:
-                piece_text = (chapter_title + "\n\n" + piece.strip()) if is_real_heading else piece.strip()
+                piece_text = piece.strip()
                 if len(piece_text.split()) < self.min_chunk_words:
                     # Buffer heading + body so it is prepended to next real chunk
                     pending_stub = (pending_stub + "\n\n" + piece_text).strip() if pending_stub else piece_text
@@ -203,8 +198,11 @@ class SemanticChunker:
 
             if section_text:
                 if pending:
-                    section_text = "\n\n".join(pending) + "\n\n" + section_text
+                    # Preserve correct order: pending headings → current heading → body
+                    section_text = "\n\n".join(pending + [title]) + "\n\n" + section_text
                     pending = []
+                else:
+                    section_text = title + "\n\n" + section_text
                 sections.append((title, section_text))
             else:
                 pending.append(title)
