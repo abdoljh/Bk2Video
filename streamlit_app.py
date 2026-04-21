@@ -165,7 +165,7 @@ with st.sidebar:
         ),
     )
     ocr_gpu = st.toggle("Use GPU for OCR", value=False)
-    ocr_dpi = st.slider("Scan DPI", 150, 400, 200, step=50)
+    ocr_dpi = st.slider("Scan DPI", 150, 400, 300, step=50)
 
     st.markdown("#### Chunking")
     max_tokens     = st.slider("Max Tokens / Chunk", 500, 3000, 1500, step=100)

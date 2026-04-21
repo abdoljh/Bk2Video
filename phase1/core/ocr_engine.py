@@ -188,9 +188,12 @@ class OCREngine:
         return "\n".join(lines)
 
     def _tesseract_page(self, image_bytes: bytes) -> str:
-        from PIL import Image  # noqa: PLC0415
+        from PIL import Image, ImageOps  # noqa: PLC0415
 
         img = Image.open(io.BytesIO(image_bytes))
+        # Add a small white border so Tesseract does not clip text that sits
+        # at the very edge of the rendered page image (top header / bottom line).
+        img = ImageOps.expand(img, border=30, fill="white")
         try:
             return self._reader.image_to_string(img, lang="ara", config="--psm 3")
         except Exception as exc:
