@@ -5,3 +5,4 @@ tesseract-ocr
 tesseract-ocr-ara
 ffmpeg
 fonts-hosny-amiri
+poppler-utils

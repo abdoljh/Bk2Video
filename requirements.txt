@@ -6,6 +6,7 @@ streamlit>=1.35.0
 
 # PDF extraction
 PyMuPDF>=1.24.0
+pdf2image>=1.17.0        # poppler-based rendering for scanned pages (full MediaBox)
 
 # Arabic text correction
 arabic-reshaper>=3.0.0

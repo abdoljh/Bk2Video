@@ -214,6 +214,19 @@ class PDFIngestor:
         meta  = self._extract_metadata(doc)
         pages: list[RawPage] = []
 
+        # Pre-render all pages with pdf2image (poppler) so that scanned pages
+        # are rendered using the full MediaBox rather than PyMuPDF's CropBox.
+        # CropBox rendering clips page-edge text (e.g. attribution headers).
+        _rendered_images: list = []
+        try:
+            from pdf2image import convert_from_path as _pdf2img  # noqa: PLC0415
+            _rendered_images = _pdf2img(str(pdf_path), dpi=self.dpi)
+            logger.info("Scanned pages rendered via pdf2image (poppler) at %d DPI.", self.dpi)
+        except ImportError:
+            logger.info("pdf2image not installed — using PyMuPDF rendering for scanned pages.")
+        except Exception as _err:
+            logger.warning("pdf2image failed (%s) — falling back to PyMuPDF rendering.", _err)
+
         try:
             for i, page in enumerate(doc):
                 page_num   = i + 1
@@ -255,9 +268,17 @@ class PDFIngestor:
                         raw_text_pre = text,
                     ))
                 else:
-                    mat       = fitz.Matrix(self.dpi / 72, self.dpi / 72)
-                    pix       = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                    img_bytes = pix.tobytes("png")
+                    if i < len(_rendered_images):
+                        # poppler render — full page, no CropBox clipping
+                        import io as _io
+                        _buf = _io.BytesIO()
+                        _rendered_images[i].save(_buf, format="PNG")
+                        img_bytes = _buf.getvalue()
+                    else:
+                        # PyMuPDF fallback
+                        mat       = fitz.Matrix(self.dpi / 72, self.dpi / 72)
+                        pix       = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                        img_bytes = pix.tobytes("png")
                     pages.append(RawPage(
                         page_number  = page_num,
                         pdf_type     = "scanned",
