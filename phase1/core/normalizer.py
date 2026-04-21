@@ -212,6 +212,9 @@ class ArabicTextNormalizer:
         re.MULTILINE,
     )
 
+    # Matches contiguous Arabic / Arabic-Indic characters in a line.
+    _ARABIC_WORD_RE = re.compile(r'[\u0600-\u06FF]+')
+
     def normalize(self, text: str, source: Source = "digital") -> str:
         if not text or not text.strip():
             return ""
@@ -280,7 +283,35 @@ class ArabicTextNormalizer:
 
         return self._clean(text).strip()
 
+    @staticmethod
+    def _detect_header_words(pages) -> frozenset:
+        """
+        Pre-pass: inspect the first non-empty line of each scanned page.
+        Any Arabic word that appears in those first-lines across 2+ distinct
+        pages is a "running header word".  This catches digit-free headers
+        whose page number was garbled by OCR into Arabic letters.
+        """
+        _WORD = re.compile(r'[\u0600-\u06FF]+')
+        word_pages: dict[str, set] = {}
+        for idx, p in enumerate(pages):
+            if getattr(p, "pdf_type", "scanned") != "scanned":
+                continue
+            for line in p.raw_text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                if len(s) <= 60:
+                    for w in _WORD.findall(s):
+                        word_pages.setdefault(w, set()).add(idx)
+                break  # first non-empty line only
+        return frozenset(w for w, pg in word_pages.items() if len(pg) >= 2)
+
     def normalize_pages(self, pages: list) -> list:
+        # Pre-pass: collect running-header words across all scanned pages.
+        # Words that appear in short (≤ 60 char) page-start lines on 2+
+        # pages are almost certainly part of the book's running header
+        # (title + page-number), even when OCR drops or corrupts the digits.
+        self._hdr_words: frozenset[str] = self._detect_header_words(pages)
         for page in pages:
             source: Source = "scanned" if page.pdf_type == "scanned" else "digital"
             before = len(page.raw_text)
@@ -321,14 +352,21 @@ class ArabicTextNormalizer:
             if re.match(r'^\d+$', stripped):
                 continue
             # Drop running headers at the very start of each scanned page.
-            # Running headers are always the first non-empty line and are short
-            # (≤ 60 chars). No digit requirement — many headers use Arabic-Indic
-            # numerals or no digits at all.
+            # A line qualifies if it is the first non-empty line AND is short
+            # (≤ 60 chars) AND either:
+            #   (a) contains a digit (ASCII or Arabic-Indic), or
+            #   (b) contains a word that cross-page frequency analysis marked
+            #       as a running-header word (set by normalize_pages pre-pass).
             is_page_start = i == 0 or all(not lines[j].strip() for j in range(i))
-            if (is_page_start
-                    and len(stripped) <= 60
-                    and re.search(r'[\u0600-\u06FF]', stripped)):
-                continue
+            if is_page_start and len(stripped) <= 60:
+                hdr_words = getattr(self, '_hdr_words', frozenset())
+                has_digit = bool(re.search(r'[0-9\u0660-\u0669]', stripped))
+                has_hdr_word = bool(hdr_words) and any(
+                    w in hdr_words
+                    for w in self._ARABIC_WORD_RE.findall(stripped)
+                )
+                if has_digit or has_hdr_word:
+                    continue
             # Skip footnote separator lines
             if re.match(r'^[─━═\-─]{4,}', stripped):
                 continue
