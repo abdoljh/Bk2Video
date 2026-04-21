@@ -321,12 +321,12 @@ class ArabicTextNormalizer:
             if re.match(r'^\d+$', stripped):
                 continue
             # Drop running headers at the very start of each scanned page.
-            # Restricting to page-start (all preceding lines blank) avoids
-            # stripping TOC entries that appear mid-page after blank lines.
+            # Running headers are always the first non-empty line and are short
+            # (≤ 60 chars). No digit requirement — many headers use Arabic-Indic
+            # numerals or no digits at all.
             is_page_start = i == 0 or all(not lines[j].strip() for j in range(i))
             if (is_page_start
                     and len(stripped) <= 60
-                    and re.search(r'[0-9]', stripped)   # ASCII digits only — avoids matching Arabic-Indic chapter numerals (١ الفصل)
                     and re.search(r'[\u0600-\u06FF]', stripped)):
                 continue
             # Skip footnote separator lines
