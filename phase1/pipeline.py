@@ -14,6 +14,7 @@ from typing import Callable
 
 from .core.ingestor      import PDFIngestor
 from .core.ocr_engine    import OCREngine, OCRBackend
+from .core.ocr_corrector import OCRTextCorrector
 from .core.normalizer    import ArabicTextNormalizer
 from .core.chunker       import SemanticChunker, Chunk
 from .core.output_writer import OutputWriter
@@ -34,6 +35,10 @@ class Phase1Config:
     # "digital" — force PyMuPDF extraction for all pages
     # "ocr"     — force OCR for all pages regardless of content
     pdf_mode:       str    = "auto"
+    # LLM OCR correction (scanned pages only)
+    # Sends raw Tesseract output through Claude Haiku to fix OCR errors and
+    # join line-wrapped text.  Requires anthropic_api_key.  ~$0.001/page.
+    ocr_correction: bool   = True
     # LLM summarization
     anthropic_api_key: str = ""
     script_genre:   str    = "non-fiction"   # hint for Scriptwriter tone
@@ -121,6 +126,22 @@ class Phase1Pipeline:
         for page in ingestion.pages:
             if page.pdf_type == "scanned" and not page.raw_text_pre:
                 page.raw_text_pre = page.raw_text   # OCR output = raw baseline
+
+        # ── Step 2b: LLM OCR correction (optional, scanned pages only) ── #
+        # Sends raw Tesseract output through Claude Haiku to fix OCR errors
+        # and join line-wrapped text into flowing paragraphs.  Runs only when
+        # an API key is present and ocr_correction is enabled.
+        if self.cfg.ocr_correction and self.cfg.anthropic_api_key and has_scanned:
+            self._progress("LLM OCR correction …", 0.28)
+            try:
+                corrector = OCRTextCorrector(
+                    api_key     = self.cfg.anthropic_api_key,
+                    on_progress = self.on_progress,
+                )
+                ingestion.pages = corrector.correct_pages(ingestion.pages)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"LLM OCR correction failed: {exc}")
+                logger.exception("LLM OCR correction failed")
 
         # ── Step 3: Normalise ─────────────────────────────────────────── #
         self._progress("Normalising Arabic text …", 0.35)
