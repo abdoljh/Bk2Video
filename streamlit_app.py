@@ -166,6 +166,15 @@ with st.sidebar:
     )
     ocr_gpu = st.toggle("Use GPU for OCR", value=False)
     ocr_dpi = st.slider("Scan DPI", 150, 400, 300, step=50)
+    ocr_correction = st.toggle(
+        "LLM OCR correction (scanned pages)",
+        value=True,
+        help=(
+            "After Tesseract, send each scanned page through Claude Haiku to fix "
+            "OCR errors and join broken lines into flowing paragraphs. "
+            "Requires an Anthropic API key. Cost: ~$0.001 per page."
+        ),
+    )
 
     st.markdown("#### Chunking")
     max_tokens     = st.slider("Max Tokens / Chunk", 500, 3000, 1500, step=100)
@@ -289,6 +298,7 @@ if uploaded:
             cfg = Phase1Config(
                 pdf_mode=pdf_mode,
                 ocr_gpu=ocr_gpu, ocr_backend=ocr_backend, ocr_dpi=ocr_dpi,
+                ocr_correction=ocr_correction,
                 max_tokens=max_tokens, overlap_tokens=overlap_tokens,
                 output_dir=str(output_dir),
                 anthropic_api_key=anthropic_key,
