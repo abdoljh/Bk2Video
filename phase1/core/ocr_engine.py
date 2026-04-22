@@ -1,11 +1,11 @@
 """
 Phase 1 — OCREngine
-Three backends: EasyOCR (default), PaddleOCR, and Tesseract (fallback).
+Three backends: Tesseract (default), EasyOCR, PaddleOCR.
 
-PaddleOCR is recommended for Arabic — it ships a dedicated Arabic recognition
-model with better layout analysis and higher accuracy on clean scans.
-EasyOCR is a solid fallback when PaddleOCR is not installed.
-Tesseract is kept for lightweight / headless environments.
+Tesseract is the default and the only backend that fits Streamlit Cloud's
+1 GB RAM limit (no PyTorch required).
+EasyOCR is a good alternative for local runs with more RAM (~450 MB model).
+PaddleOCR gives the best Arabic accuracy but requires ~1 GB and Python ≤ 3.12.
 """
 
 from __future__ import annotations
@@ -33,26 +33,24 @@ class OCREngine:
 
     Backend comparison for Arabic PDFs:
 
-    PaddleOCR  — Best accuracy on Arabic. Uses a dedicated Arabic recognition
-                 model (PP-OCRv3-ar). Handles multi-column layouts well.
-                 Requires: paddlepaddle + paddleocr  (~1 GB download on first run).
+    Tesseract  — Default. Lightweight; fits Streamlit Cloud's 1 GB RAM limit.
+                 Requires: pytesseract + system tesseract-ocr with arabic language pack.
 
     EasyOCR    — Good accuracy without extra setup. Handles Arabic RTL natively.
-                 Requires: easyocr (~450 MB download on first run).
+                 Requires: easyocr (~450 MB download on first run).  Local use only.
 
-    Tesseract  — Lightweight, no model download needed if system Tesseract is
-                 installed. Lower Arabic accuracy on complex layouts.
-                 Requires: pytesseract + system tesseract-ocr with arabic language pack.
+    PaddleOCR  — Best Arabic accuracy. Uses a dedicated PP-OCRv3-ar model.
+                 Requires: paddlepaddle + paddleocr (~1 GB), Python ≤ 3.12.  Local only.
 
     Usage::
 
-        engine = OCREngine(backend=OCRBackend.PADDLEOCR)
+        engine = OCREngine(backend=OCRBackend.TESSERACT)
         pages  = engine.process_pages(ingestion_result.pages)
     """
 
     def __init__(
         self,
-        backend: OCRBackend = OCRBackend.EASYOCR,
+        backend: OCRBackend = OCRBackend.TESSERACT,
         gpu: bool = False,
     ):
         self.backend = backend
