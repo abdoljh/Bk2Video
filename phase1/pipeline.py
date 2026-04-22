@@ -117,7 +117,7 @@ class Phase1Pipeline:
                 )
                 logger.warning(warnings[-1])
             backend = _backend_map.get(self.cfg.ocr_backend, OCRBackend.TESSERACT)
-            ocr = OCREngine(backend=backend, gpu=self.cfg.ocr_gpu)
+            ocr = OCREngine(backend=backend, gpu=self.cfg.ocr_gpu, dpi=self.cfg.ocr_dpi)
             try:
                 ingestion.pages = ocr.process_pages(ingestion.pages)
             except ImportError as exc:

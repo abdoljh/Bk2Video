@@ -52,9 +52,11 @@ class OCREngine:
         self,
         backend: OCRBackend = OCRBackend.TESSERACT,
         gpu: bool = False,
+        dpi: int = 300,
     ):
         self.backend = backend
         self.gpu = gpu
+        self.dpi = dpi
         self._reader = None   # lazy-loaded
 
     # ------------------------------------------------------------------ #
@@ -200,7 +202,7 @@ class OCREngine:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         arr = np.array(img)
         try:
-            return self._reader.image_to_string(arr, lang="ara", config="--psm 3")
+            return self._reader.image_to_string(arr, lang="ara", config=f"--psm 3 --dpi {self.dpi}")
         except Exception as exc:
             logger.warning("Tesseract OCR failed on page: %s", exc)
             return ""
