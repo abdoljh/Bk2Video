@@ -275,7 +275,11 @@ class PDFIngestor:
                         _rendered_images[i].save(_buf, format="PNG")
                         img_bytes = _buf.getvalue()
                     else:
-                        # PyMuPDF fallback
+                        # PyMuPDF fallback — expand CropBox to MediaBox so that
+                        # text at page-edge margins is not silently clipped.
+                        # (pdf2image uses poppler which always renders the full
+                        # MediaBox; we replicate that here for the fallback path.)
+                        page.set_cropbox(page.mediabox)
                         mat       = fitz.Matrix(self.dpi / 72, self.dpi / 72)
                         pix       = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
                         img_bytes = pix.tobytes("png")

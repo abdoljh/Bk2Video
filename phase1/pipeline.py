@@ -103,10 +103,10 @@ class Phase1Pipeline:
             }
             if self.cfg.ocr_backend not in _backend_map:
                 warnings.append(
-                    f"Unknown OCR backend '{self.cfg.ocr_backend}' — defaulting to EasyOCR."
+                    f"Unknown OCR backend '{self.cfg.ocr_backend}' — defaulting to Tesseract."
                 )
                 logger.warning(warnings[-1])
-            backend = _backend_map.get(self.cfg.ocr_backend, OCRBackend.EASYOCR)
+            backend = _backend_map.get(self.cfg.ocr_backend, OCRBackend.TESSERACT)
             ocr = OCREngine(backend=backend, gpu=self.cfg.ocr_gpu)
             try:
                 ingestion.pages = ocr.process_pages(ingestion.pages)
