@@ -15,6 +15,7 @@ from typing import Callable
 from .core.ingestor      import PDFIngestor
 from .core.ocr_engine    import OCREngine, OCRBackend
 from .core.ocr_corrector import OCRTextCorrector
+from .core.page_stitcher import PageStitcher
 from .core.normalizer    import ArabicTextNormalizer
 from .core.chunker       import SemanticChunker, Chunk
 from .core.output_writer import OutputWriter
@@ -39,6 +40,10 @@ class Phase1Config:
     # Sends raw Tesseract output through Claude Haiku to fix OCR errors and
     # join line-wrapped text.  Requires anthropic_api_key.  ~$0.001/page.
     ocr_correction: bool   = True
+    # Cross-page boundary stitching (scanned pages only)
+    # Strips running headers/footers and joins sentences split across page
+    # breaks.  Runs after OCR correction.  ~$0.0001/boundary.
+    page_stitching: bool   = True
     # LLM summarization
     anthropic_api_key: str = ""
     script_genre:   str    = "non-fiction"   # hint for Scriptwriter tone
@@ -142,6 +147,21 @@ class Phase1Pipeline:
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"LLM OCR correction failed: {exc}")
                 logger.exception("LLM OCR correction failed")
+
+        # ── Step 2c: Cross-page boundary stitching (scanned pages only) ─ #
+        # Strips running headers/footers and joins sentences split across
+        # page breaks.  Runs after OCR correction so the LLM sees clean text.
+        if self.cfg.page_stitching and self.cfg.anthropic_api_key and has_scanned:
+            self._progress("Stitching page boundaries …", 0.32)
+            try:
+                stitcher = PageStitcher(
+                    api_key     = self.cfg.anthropic_api_key,
+                    on_progress = self.on_progress,
+                )
+                ingestion.pages = stitcher.stitch_pages(ingestion.pages)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Page stitching failed: {exc}")
+                logger.exception("Page stitching failed")
 
         # ── Step 3: Normalise ─────────────────────────────────────────── #
         self._progress("Normalising Arabic text …", 0.35)
