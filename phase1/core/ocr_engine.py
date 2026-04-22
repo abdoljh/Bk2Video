@@ -186,14 +186,21 @@ class OCREngine:
         return "\n".join(lines)
 
     def _tesseract_page(self, image_bytes: bytes) -> str:
-        from PIL import Image, ImageOps  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
 
-        img = Image.open(io.BytesIO(image_bytes))
-        # Add a small white border so Tesseract does not clip text that sits
-        # at the very edge of the rendered page image (top header / bottom line).
-        img = ImageOps.expand(img, border=30, fill="white")
+        # Pass a numpy array (not a PIL Image) so that pytesseract writes the
+        # temp file without embedded DPI metadata.  PIL Images carry the
+        # pdf2image render DPI (300 dpi) into the PNG pHYs chunk; Tesseract
+        # then applies stricter layout-analysis thresholds and drops isolated
+        # lines at page edges (attribution headers, last body lines).  A
+        # numpy array has no DPI metadata, so Tesseract uses its 70-dpi
+        # default and correctly segments the full page — matching the
+        # behaviour of the reference notebook (optimized_approach.txt).
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        arr = np.array(img)
         try:
-            return self._reader.image_to_string(img, lang="ara", config="--psm 3")
+            return self._reader.image_to_string(arr, lang="ara", config="--psm 3")
         except Exception as exc:
             logger.warning("Tesseract OCR failed on page: %s", exc)
             return ""
